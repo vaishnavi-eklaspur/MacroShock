@@ -120,10 +120,6 @@ def exposure_matrix(assets: pd.DataFrame) -> np.ndarray:
     return B
 
 
-def shocks_to_vector(shocks: dict[str, float]) -> np.ndarray:
-    return np.array([float(shocks.get(f, 0.0)) for f in FACTOR_ORDER])
-
-
 def scenario_asset_returns(assets: pd.DataFrame, shocks: dict[str, float]) -> np.ndarray:
     """Per-asset return under a factor-shock scenario.
 
