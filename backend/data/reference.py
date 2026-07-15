@@ -11,7 +11,7 @@ from __future__ import annotations
 
 # Bumped whenever the model or reference data changes; used to version the cache so a
 # model change can never serve stale (now-wrong) cached numbers.
-MODEL_VERSION = "3.1.0"
+MODEL_VERSION = "4.0.0"
 
 # --- Macro factors -----------------------------------------------------------------
 # unit:
@@ -70,22 +70,53 @@ CRISIS_CORRELATIONS: list[list[float]] = [
 # (see REALIZED_CRISIS_RETURNS and the backtest). Cross-loadings are kept minimal to avoid
 # double-counting: each asset loads mainly on its primary factor(s). Gold is modelled as a
 # safe haven (negative equity beta + negative FX beta), NOT a commodity.
+# A 13-asset multi-asset universe spanning US/intl/EM equity, the Treasury curve, IG/HY
+# credit, TIPS, gold, broad commodities and REITs. Enough breadth that diversification,
+# curve positioning and credit-vs-rates trade-offs become visible - not a toy 5-asset set.
 ASSETS: list[dict] = [
-    {"ticker": "SPY", "name": "S&P 500 ETF",                    "asset_class": "Equity",
+    # --- Equity -----------------------------------------------------------------------
+    {"ticker": "SPY", "name": "S&P 500 ETF",                    "asset_class": "Equity - US Large Cap",
      "equity_beta": 1.00, "eff_duration": 0.0, "spread_duration": 0.0, "commodity_beta": 0.00,
      "liquidity_beta": 0.00, "fx_beta": -0.05, "convexity": 0.0,  "display_order": 1},
+    {"ticker": "QQQ", "name": "Nasdaq-100 (US Growth)",         "asset_class": "Equity - US Growth",
+     "equity_beta": 1.15, "eff_duration": 0.0, "spread_duration": 0.0, "commodity_beta": 0.00,
+     "liquidity_beta": 0.05, "fx_beta": -0.05, "convexity": 0.0,  "display_order": 2},
+    {"ticker": "IWM", "name": "Russell 2000 (US Small Cap)",    "asset_class": "Equity - US Small Cap",
+     "equity_beta": 1.20, "eff_duration": 0.0, "spread_duration": 0.0, "commodity_beta": 0.00,
+     "liquidity_beta": 0.25, "fx_beta": 0.00, "convexity": 0.0,  "display_order": 3},
+    {"ticker": "EFA", "name": "MSCI EAFE (Dev. ex-US Equity)",  "asset_class": "Equity - Intl Developed",
+     "equity_beta": 0.95, "eff_duration": 0.0, "spread_duration": 0.0, "commodity_beta": 0.05,
+     "liquidity_beta": 0.10, "fx_beta": -0.30, "convexity": 0.0,  "display_order": 4},
+    {"ticker": "EEM", "name": "MSCI Emerging Markets Equity",   "asset_class": "Equity - Emerging",
+     "equity_beta": 1.15, "eff_duration": 0.0, "spread_duration": 0.0, "commodity_beta": 0.15,
+     "liquidity_beta": 0.35, "fx_beta": -0.45, "convexity": 0.0,  "display_order": 5},
+    # --- Rates ------------------------------------------------------------------------
     {"ticker": "IEF", "name": "7-10y US Treasury ETF",          "asset_class": "Fixed Income - Rates",
      "equity_beta": -0.02, "eff_duration": 7.5, "spread_duration": 0.0, "commodity_beta": 0.00,
-     "liquidity_beta": -0.05, "fx_beta": 0.05, "convexity": 80.0, "display_order": 2},
-    {"ticker": "LQD", "name": "Investment-Grade Corp Bond ETF", "asset_class": "Fixed Income - Credit",
+     "liquidity_beta": -0.05, "fx_beta": 0.05, "convexity": 80.0, "display_order": 6},
+    {"ticker": "TLT", "name": "20+y US Treasury ETF (Long)",    "asset_class": "Fixed Income - Rates Long",
+     "equity_beta": -0.05, "eff_duration": 17.0, "spread_duration": 0.0, "commodity_beta": 0.00,
+     "liquidity_beta": -0.10, "fx_beta": 0.10, "convexity": 300.0, "display_order": 7},
+    {"ticker": "TIP", "name": "TIPS (Inflation-Linked UST)",    "asset_class": "Fixed Income - Inflation",
+     "equity_beta": 0.02, "eff_duration": 7.0, "spread_duration": 0.0, "commodity_beta": 0.12,
+     "liquidity_beta": 0.00, "fx_beta": 0.00, "convexity": 70.0, "display_order": 8},
+    # --- Credit -----------------------------------------------------------------------
+    {"ticker": "LQD", "name": "Investment-Grade Corp Bond ETF", "asset_class": "Fixed Income - IG Credit",
      "equity_beta": 0.05, "eff_duration": 7.5, "spread_duration": 6.0, "commodity_beta": 0.00,
-     "liquidity_beta": 0.30, "fx_beta": -0.03, "convexity": 90.0, "display_order": 3},
+     "liquidity_beta": 0.30, "fx_beta": -0.03, "convexity": 90.0, "display_order": 9},
+    {"ticker": "HYG", "name": "High-Yield Corp Bond ETF",       "asset_class": "Fixed Income - High Yield",
+     "equity_beta": 0.35, "eff_duration": 4.0, "spread_duration": 4.0, "commodity_beta": 0.05,
+     "liquidity_beta": 0.45, "fx_beta": -0.05, "convexity": 40.0, "display_order": 10},
+    # --- Real assets ------------------------------------------------------------------
     {"ticker": "GLD", "name": "Gold (safe haven)",              "asset_class": "Precious Metal - Safe Haven",
      "equity_beta": -0.18, "eff_duration": 0.0, "spread_duration": 0.0, "commodity_beta": 0.00,
-     "liquidity_beta": 0.20, "fx_beta": -0.20, "convexity": 0.0,  "display_order": 4},
+     "liquidity_beta": 0.20, "fx_beta": -0.20, "convexity": 0.0,  "display_order": 11},
     {"ticker": "DBC", "name": "Broad Commodity Index",          "asset_class": "Commodity",
      "equity_beta": 0.15, "eff_duration": 0.0, "spread_duration": 0.0, "commodity_beta": 0.85,
-     "liquidity_beta": 0.10, "fx_beta": -0.15, "convexity": 0.0,  "display_order": 5},
+     "liquidity_beta": 0.10, "fx_beta": -0.15, "convexity": 0.0,  "display_order": 12},
+    {"ticker": "VNQ", "name": "US REITs (Real Estate)",         "asset_class": "Real Estate",
+     "equity_beta": 1.00, "eff_duration": 4.0, "spread_duration": 1.0, "commodity_beta": 0.00,
+     "liquidity_beta": 0.25, "fx_beta": -0.05, "convexity": 20.0, "display_order": 13},
 ]
 
 ASSET_ORDER = [a["ticker"] for a in ASSETS]
@@ -110,12 +141,52 @@ SCENARIOS: list[dict] = [
                     "Commodity": -0.38, "Liquidity": -0.25, "FX": 0.08},
     },
     {
+        "scenario_id": "DOTCOM_2000", "name": "2000-02 Dot-com Bust",
+        "description": "Mar 2000-Oct 2002: tech/growth collapse, Fed cuts (yields fall), modest "
+                       "credit widening, commodities roughly flat, mild USD bid.",
+        "is_historical": 1, "display_order": 3,
+        "shocks": {"Equity": -0.45, "Rates": -0.0200, "Credit": 0.0120,
+                    "Commodity": 0.05, "Liquidity": -0.05, "FX": 0.05},
+    },
+    {
+        "scenario_id": "EURO_2011", "name": "2011 Euro Sovereign Crisis",
+        "description": "Jul-Oct 2011: risk-off on peripheral sovereign stress, flight to Treasuries, "
+                       "IG/HY spreads widen, commodities soften, USD haven bid.",
+        "is_historical": 1, "display_order": 4,
+        "shocks": {"Equity": -0.16, "Rates": -0.0070, "Credit": 0.0140,
+                    "Commodity": -0.08, "Liquidity": -0.07, "FX": 0.06},
+    },
+    {
+        "scenario_id": "TAPER_2013", "name": "2013 Taper Tantrum",
+        "description": "May-Sep 2013: rates spike on Fed taper signal, bonds fall, EM and rate-"
+                       "sensitive assets hit hardest, equity only mildly down.",
+        "is_historical": 1, "display_order": 5,
+        "shocks": {"Equity": -0.04, "Rates": 0.0100, "Credit": 0.0050,
+                    "Commodity": -0.06, "Liquidity": -0.02, "FX": 0.04},
+    },
+    {
+        "scenario_id": "RATE_SHOCK_2022", "name": "2022 Inflation / Rate Shock",
+        "description": "2022: fastest hiking cycle in decades - stocks AND bonds fall together, "
+                       "long duration crushed, commodities rally, strong USD.",
+        "is_historical": 1, "display_order": 6,
+        "shocks": {"Equity": -0.18, "Rates": 0.0220, "Credit": 0.0080,
+                    "Commodity": 0.16, "Liquidity": -0.04, "FX": 0.08},
+    },
+    {
         "scenario_id": "INFLATION_2026", "name": "Synthetic 2026 Inflation Spike",
         "description": "Forward-looking: yields rise sharply, bonds fall, credit widens modestly, "
                        "real assets rally, mild funding stress, softer USD.",
-        "is_historical": 0, "display_order": 3,
+        "is_historical": 0, "display_order": 7,
         "shocks": {"Equity": -0.15, "Rates": 0.0200, "Credit": 0.0120,
                     "Commodity": 0.30, "Liquidity": -0.02, "FX": -0.05},
+    },
+    {
+        "scenario_id": "STAGFLATION_SYNTH", "name": "Synthetic Stagflation",
+        "description": "Forward-looking: growth stalls while inflation stays high - equity falls, "
+                       "yields rise, credit widens, commodities surge, weaker USD.",
+        "is_historical": 0, "display_order": 8,
+        "shocks": {"Equity": -0.22, "Rates": 0.0180, "Credit": 0.0180,
+                    "Commodity": 0.38, "Liquidity": -0.06, "FX": -0.06},
     },
 ]
 
@@ -124,13 +195,41 @@ SCENARIOS: list[dict] = [
 # history. These are INDEPENDENT of the factor model (not generated from exposures), so
 # comparing model-predicted vs. these realized figures is a genuine out-of-sample check,
 # not a self-fulfilling one. Synthetic scenarios have no realized data and are excluded.
+# Five crisis windows now provide out-of-sample folds (was two). Figures are representative
+# total returns over each documented window; assets that did not yet trade in a window are
+# omitted (the backtest handles partial coverage). Pre-2006 gold/commodity use spot proxies.
 REALIZED_CRISIS_RETURNS: dict[str, dict[str, float]] = {
-    "GFC_2008":   {"SPY": -0.46, "IEF": 0.15, "LQD": -0.12, "GLD": 0.05, "DBC": -0.50},
-    "COVID_2020": {"SPY": -0.34, "IEF": 0.10, "LQD": -0.14, "GLD": -0.02, "DBC": -0.40},
+    "GFC_2008": {
+        "SPY": -0.46, "QQQ": -0.44, "IWM": -0.52, "EFA": -0.55, "EEM": -0.58,
+        "IEF": 0.15, "TLT": 0.28, "TIP": -0.03, "LQD": -0.12, "HYG": -0.31,
+        "GLD": 0.05, "DBC": -0.50, "VNQ": -0.62,
+    },
+    "COVID_2020": {
+        "SPY": -0.34, "QQQ": -0.28, "IWM": -0.41, "EFA": -0.34, "EEM": -0.33,
+        "IEF": 0.10, "TLT": 0.14, "TIP": 0.01, "LQD": -0.14, "HYG": -0.21,
+        "GLD": -0.02, "DBC": -0.40, "VNQ": -0.42,
+    },
+    "EURO_2011": {
+        "SPY": -0.16, "QQQ": -0.13, "IWM": -0.25, "EFA": -0.22, "EEM": -0.24,
+        "IEF": 0.06, "TLT": 0.30, "TIP": 0.03, "LQD": 0.02, "HYG": -0.07,
+        "GLD": 0.08, "DBC": -0.09, "VNQ": -0.14,
+    },
+    "RATE_SHOCK_2022": {
+        "SPY": -0.18, "QQQ": -0.33, "IWM": -0.21, "EFA": -0.14, "EEM": -0.20,
+        "IEF": -0.12, "TLT": -0.31, "TIP": -0.12, "LQD": -0.18, "HYG": -0.11,
+        "GLD": -0.01, "DBC": 0.19, "VNQ": -0.26,
+    },
+    "DOTCOM_2000": {  # only ETFs/proxies trading over 2000-02
+        "SPY": -0.47, "QQQ": -0.78, "IEF": 0.28, "LQD": 0.20, "GLD": 0.12,
+    },
 }
 
-# Default illustrative portfolio (weights sum to 1.0).
-DEFAULT_WEIGHTS: dict[str, float] = {"SPY": 0.40, "IEF": 0.20, "LQD": 0.20, "GLD": 0.10, "DBC": 0.10}
+# Default illustrative portfolio (weights sum to 1.0) - a diversified multi-asset sleeve.
+DEFAULT_WEIGHTS: dict[str, float] = {
+    "SPY": 0.20, "QQQ": 0.08, "IWM": 0.04, "EFA": 0.08, "EEM": 0.05,
+    "IEF": 0.10, "TLT": 0.05, "TIP": 0.05, "LQD": 0.10, "HYG": 0.05,
+    "GLD": 0.06, "DBC": 0.04, "VNQ": 0.10,
+}
 
 # --- History generation parameters --------------------------------------------------
 N_WEEKS = 520                    # ~10 years of weekly observations

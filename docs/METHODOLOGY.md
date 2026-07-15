@@ -419,9 +419,9 @@ to — a consistency check, not a forecast. v3 adds a **leave-one-crisis-out** t
 3. Score against three naive benchmarks — **predict-zero**, **repeat-last-crisis**, and
    **equity-factor-only** — and report a **skill ratio** `1 − RMSE_model / RMSE_benchmark`.
 
-Positive skill means the factor model genuinely beats the naive rule. With only two crisis
-windows this is indicative, not conclusive, and is labelled as such. The in-sample check is
-retained but explicitly marked "not a skill test."
+Positive skill means the factor model genuinely beats the naive rule. With five crisis
+windows (GFC, Euro 2011, dot-com, COVID, 2022) this is indicative, not conclusive, and is
+labelled as such. The in-sample check is retained but explicitly marked "not a skill test."
 
 ## 22. Chi-square regime detection (was: top-x% selection bias)
 
@@ -503,7 +503,7 @@ out-of-sample; multicollinearity is disclosed). What remains:
   events. This is the honest ceiling of a self-contained demo. It is **one provider swap** from
   real data (`CsvReturnsProvider` / `YFinanceReturnsProvider`), and no analytics assume the
   data is synthetic.
-- **Only two crisis windows** exist for the out-of-sample test, so the skill score is
+- **Only five crisis windows** exist for the out-of-sample test, so the skill score is
   indicative, not statistically conclusive.
 - **Exposures are static within a regime** (two-state calm/crisis), not a continuous
   time-varying (DCC-GARCH) model.
@@ -534,7 +534,7 @@ realized crisis returns:
   factor pricing stays within realistic magnitudes.
 
 Result: in-sample per-asset backtest **MAE ≈ 1%** (was ~17%). The betas remain hand-set
-structural assumptions (durations from published data; loadings calibrated to two crises), not
+structural assumptions (durations from published data; loadings calibrated to five crises), not
 statistically estimated — stated plainly, not dressed up as measurements.
 
 ## 33. Reverse-stress bounding, feasibility and honest language
