@@ -42,3 +42,22 @@ def risk_contributions(weights: np.ndarray, cov: np.ndarray) -> RiskContribution
     component = w * marginal
     percentage = component / sigma
     return RiskContribution(sigma, marginal, component, percentage)
+
+
+def conditional_risk_contributions(weights: np.ndarray, calm_cov: np.ndarray,
+                                   stressed_cov: np.ndarray) -> dict:
+    """Compare risk attribution under the normal-times vs. the crisis-regime covariance.
+
+    This is the fix for scenario-agnostic attribution: because correlations rise in a
+    crisis, a holding's *share of risk* shifts. Reporting both makes the change explicit -
+    e.g. a credit holding that looks benign in calm times can dominate risk under stress.
+    """
+    calm = risk_contributions(weights, calm_cov)
+    stressed = risk_contributions(weights, stressed_cov)
+    n = len(calm.percentage)
+    return {
+        "calm": calm,
+        "stressed": stressed,
+        "pctr_shift": (stressed.percentage - calm.percentage),  # + == holding gets riskier in stress
+        "n": n,
+    }

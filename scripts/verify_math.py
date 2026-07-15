@@ -197,6 +197,69 @@ def verify_reverse_stress():
     check("s* is minimum-Mahalanobis (most plausible)", worse, f"d*={d0:.6e}")
 
 
+def _cornish_fisher_quantile(z, S, K):
+    return (z + (z**2 - 1) / 6 * S + (z**3 - 3 * z) / 24 * K - (2 * z**3 - 5 * z) / 36 * S**2)
+
+
+def verify_cornish_fisher():
+    print("7. Cornish-Fisher VaR quantile adjustment")
+    z95 = norm_ppf(0.05)   # lower tail
+    z99 = norm_ppf(0.01)
+    # No skew/kurtosis -> recovers the Gaussian quantile exactly.
+    check("S=K=0 recovers Gaussian", approx(_cornish_fisher_quantile(z95, 0, 0), z95, 1e-12))
+    # Positive excess kurtosis fattens the deep tail (99%): more negative quantile => larger VaR.
+    check("kurtosis fattens 99% tail", _cornish_fisher_quantile(z99, 0, 3) < z99,
+          f"{_cornish_fisher_quantile(z99, 0, 3):.4f} < {z99:.4f}")
+    # Negative skew increases left-tail VaR at 95%.
+    check("negative skew raises 95% VaR", _cornish_fisher_quantile(z95, -1.0, 0) < z95,
+          f"{_cornish_fisher_quantile(z95, -1.0, 0):.4f} < {z95:.4f}")
+
+
+def verify_shrinkage():
+    print("8. Ledoit-Wolf shrinkage sanity")
+    # Tiny 6x3 demeaned-ish dataset.
+    X = [[0.02, -0.01, 0.03], [-0.01, 0.02, -0.02], [0.03, 0.01, 0.01],
+         [-0.02, -0.03, 0.02], [0.01, 0.02, -0.01], [-0.03, 0.01, 0.00]]
+    T, n = len(X), len(X[0])
+    mean = [sum(X[t][j] for t in range(T)) / T for j in range(n)]
+    Xc = [[X[t][j] - mean[j] for j in range(n)] for t in range(T)]
+    # S = Xc^T Xc / T
+    S = [[sum(Xc[t][i] * Xc[t][j] for t in range(T)) / T for j in range(n)] for i in range(n)]
+    m = sum(S[i][i] for i in range(n)) / n
+    F = [[m if i == j else 0.0 for j in range(n)] for i in range(n)]
+    d2 = sum((S[i][j] - F[i][j]) ** 2 for i in range(n) for j in range(n))
+    b2 = 0.0
+    for t in range(T):
+        for i in range(n):
+            for j in range(n):
+                b2 += (Xc[t][i] * Xc[t][j] - S[i][j]) ** 2
+    b2 /= T * T
+    delta = max(0.0, min(1.0, b2 / d2)) if d2 > 0 else 0.0
+    sigma = [[delta * F[i][j] + (1 - delta) * S[i][j] for j in range(n)] for i in range(n)]
+    check("shrinkage intensity in [0,1]", 0.0 <= delta <= 1.0, f"delta={delta:.4f}")
+    off_shrunk = all(abs(sigma[i][j]) <= abs(S[i][j]) + 1e-15
+                     for i in range(n) for j in range(n) if i != j)
+    check("off-diagonals shrunk toward 0", off_shrunk)
+
+
+def verify_single_factor_reverse():
+    print("9. Reverse stress single-factor paths  s_j = -L/g_j")
+    B = [[1.0, 0.0], [0.0, -7.5], [0.5, -4.0]]
+    w = [0.5, 0.3, 0.2]
+    Bt = transpose(B)
+    g = mat_vec(Bt, w)
+    L = 0.15
+    ok = True
+    for j in range(2):
+        if abs(g[j]) < 1e-12:
+            continue
+        s = [0.0, 0.0]
+        s[j] = -L / g[j]
+        if not approx(vec_dot(g, s), -L, 1e-12):
+            ok = False
+    check("each single-factor path hits -L", ok, f"g={[round(x,4) for x in g]}")
+
+
 def main():
     print("=" * 68)
     print("MacroShock — independent formula verification (stdlib only)")
@@ -207,6 +270,9 @@ def main():
     verify_ols()
     verify_bond_pricing()
     verify_reverse_stress()
+    verify_cornish_fisher()
+    verify_shrinkage()
+    verify_single_factor_reverse()
     print("-" * 68)
     print(f"RESULT: {PASS} passed, {FAIL} failed")
     print("=" * 68)

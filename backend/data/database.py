@@ -20,7 +20,7 @@ def get_assets(db_path: str | None = None) -> pd.DataFrame:
     """Asset reference data incl. factor sensitivities, ordered for display."""
     sql = """
         SELECT ticker, name, asset_class, equity_beta, eff_duration,
-               spread_duration, commodity_beta, convexity
+               spread_duration, commodity_beta, liquidity_beta, fx_beta, convexity
         FROM assets
         ORDER BY display_order
     """
@@ -91,3 +91,14 @@ def get_scenario(scenario_id: str, db_path: str | None = None) -> dict | None:
         if s["scenario_id"] == scenario_id:
             return s
     return None
+
+
+def get_realized_crisis_returns(db_path: str | None = None) -> dict[str, dict[str, float]]:
+    """Realized crisis returns keyed {scenario_id: {ticker: realized_return}} for backtesting."""
+    sql = "SELECT scenario_id, ticker, realized_return FROM realized_crisis_returns"
+    with _conn(db_path) as c:
+        rows = c.cursor().execute(sql).fetchall()
+    out: dict[str, dict[str, float]] = {}
+    for scenario_id, ticker, realized in rows:
+        out.setdefault(scenario_id, {})[ticker] = float(realized)
+    return out

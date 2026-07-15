@@ -5,48 +5,54 @@ from analytics.reverse import reverse_stress
 
 
 def _setup():
-    # 3 assets, 2 factors.
+    # 2 factors named so DEFAULT_BOUNDS applies (Equity, Rates).
     B = np.array([
-        [1.0, 0.0],     # pure equity
-        [0.0, -7.5],    # pure rates (duration)
-        [0.5, -4.0],    # mixed
+        [1.0, 0.0],
+        [0.0, -7.5],
+        [0.5, -4.0],
     ])
     factor_cov = np.array([
         [0.16 ** 2 / 52, 0.0],
         [0.0, (0.010 ** 2) / 52],
     ])
-    factor_names = ["Equity", "Rates"]
-    return B, factor_cov, factor_names
+    return B, factor_cov, ["Equity", "Rates"]
 
 
 def test_reverse_stress_hits_target_loss():
     B, cov, names = _setup()
     w = np.array([0.5, 0.3, 0.2])
     res = reverse_stress(w, B, cov, target_loss=0.20, factor_names=names)
-    # Implied loss must equal the requested target.
-    assert res.implied_loss == pytest.approx(0.20, abs=1e-9)
+    # Primary (constrained or fallback) must produce the requested loss.
+    assert res.implied_loss == pytest.approx(0.20, abs=1e-6)
 
 
-def test_reverse_stress_solution_is_minimum_norm():
-    # The closed-form solution s* = -L * Sigma g / (g' Sigma g) must satisfy the constraint
-    # g's* = -L, and any other feasible s must have >= Mahalanobis distance.
+def test_unconstrained_is_minimum_norm():
     B, cov, names = _setup()
     w = np.array([0.4, 0.4, 0.2])
     L = 0.15
     res = reverse_stress(w, B, cov, target_loss=L, factor_names=names)
 
     g = B.T @ w
-    s_star = np.array([res.shocks[n] for n in names])
-    assert g @ s_star == pytest.approx(-L, abs=1e-9)
+    s_unc = np.array([res.unconstrained_shocks[n] for n in names])
+    assert g @ s_unc == pytest.approx(-L, abs=1e-9)
 
     inv = np.linalg.inv(cov)
-    d_star = s_star @ inv @ s_star
-    # Perturb along the null space of the constraint; distance must not decrease.
-    # Null direction v with g'v = 0:
-    v = np.array([g[1], -g[0]])
+    d_star = s_unc @ inv @ s_unc
+    v = np.array([g[1], -g[0]])  # null direction of the constraint
     for eps in (-0.01, 0.01):
-        s_alt = s_star + eps * v
+        s_alt = s_unc + eps * v
         assert s_alt @ inv @ s_alt >= d_star - 1e-12
+
+
+def test_alternatives_ranked_by_plausibility():
+    B, cov, names = _setup()
+    w = np.array([0.5, 0.3, 0.2])
+    res = reverse_stress(w, B, cov, target_loss=0.20, factor_names=names, top_k=2)
+    dists = [a["mahalanobis_distance"] for a in res.alternatives]
+    assert dists == sorted(dists)                 # ascending plausibility
+    for a in res.alternatives:                    # each single-factor path hits the loss
+        s = np.array([a["shocks"][n] for n in names])
+        assert (B.T @ w) @ s == pytest.approx(-0.20, abs=1e-9)
 
 
 def test_mahalanobis_distance_positive():

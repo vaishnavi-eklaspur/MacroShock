@@ -6,7 +6,7 @@ single source of truth for the analytics layer. All symbols are defined once and
 > **Positioning:** MacroShock is a *portfolio consulting co-pilot*. It answers four questions
 > a portfolio manager actually asks: **what breaks, why it breaks, which holding is to blame,
 > and the single trade that reduces the pain** — using the same factor-based risk vocabulary
-> as institutional platforms (Aladdin-style).
+> as institutional risk platforms.
 
 ---
 
@@ -274,3 +274,124 @@ classes (fixed random seed for reproducibility), while **scenario shocks are cal
 real crisis magnitudes** (Section 6.3). The data layer reads from SQLite via a mock Snowflake
 connector, so swapping in a real warehouse table or a licensed feed (FactSet/Bloomberg-style)
 is a one-file change. Nothing in the analytics assumes the data is synthetic.
+
+
+
+---
+
+# Part II — v2.0 Upgrades (rigor)
+
+These sections extend the model to address the standard critiques of a naive stress tool:
+Gaussian tails, self-validating data, scenario-agnostic attribution, static correlations,
+missing risk factors, and unconstrained reverse stress.
+
+## 13. Expanded factor set (6 factors)
+
+The factor set is now **Equity, Rates, Credit, Commodity, Liquidity, FX**.
+
+- **Liquidity** (return-space; down = funding/market stress). Loadings `liquidity_beta`
+  capture assets hit by a dash-for-cash independent of credit spreads — e.g. IG corporates
+  in March 2020 fell on *liquidity* as well as spread. Naming a scenario a "liquidity freeze"
+  now has a factor to back it.
+- **FX** (trade-weighted USD return; up = USD strength). Loadings `fx_beta` capture the haven
+  bid for the dollar in crises and its drag on gold/commodities.
+- **Gold** is re-classified as a **safe-haven / real-rates** asset (small commodity loading,
+  negative FX loading), not a pure commodity — its crisis behaviour is monetary, not cyclical.
+
+Scenario asset return generalizes to `r_i = Σ_k B_{i,k} s_k` over all six factors (bond
+convexity retained on the Rates term).
+
+## 14. Regime-switching, fat-tailed data generation
+
+The historical series is generated from a **two-regime** model:
+
+- **Calm** and **crisis** regimes each have their **own correlation matrix**; crisis
+  correlations amplify toward the risk-off cluster (contagion). This reproduces the empirical
+  fact that diversification fails precisely when it is needed.
+- Factor innovations are **Student-t** (fat tails), with fewer degrees of freedom in the
+  crisis regime (`ν=4`) than in calm (`ν=8`), scaled so the target covariance is preserved.
+- Idiosyncratic noise is sized so the factor regression **R² is realistic (~0.7–0.85)**, not
+  the ~0.99 that a noiseless factor construction would produce. A near-1.0 R² is a red flag
+  for planted/circular data; we deliberately avoid it.
+
+Crisis correlation matrices are projected to the **nearest positive-semidefinite** matrix
+(eigenvalue clipping) before use, so Cholesky sampling is always valid.
+
+## 15. Robust covariance (Ledoit–Wolf shrinkage)
+
+The sample covariance is noisy when `T` is not ≫ `n`, and that noise flows straight into
+MCTR. We shrink toward a scaled-identity target `F = m·I`:
+
+```
+Σ_shrunk = δ·F + (1−δ)·S
+```
+
+with the optimal intensity `δ` estimated per Ledoit & Wolf (2004). The intensity is reported
+in `/api/meta` so the degree of shrinkage is transparent.
+
+## 16. Fat-tailed risk measures
+
+Gaussian VaR is retained as a baseline but is explicitly shown alongside three tail-aware
+measures so its optimism is visible:
+
+- **Historical VaR / CVaR** — empirical `(1−α)` quantile / tail mean of realized returns.
+- **Cornish–Fisher (modified) VaR** — corrects the Gaussian quantile for skew `S` and excess
+  kurtosis `K`:
+  ```
+  z_cf = z + (z²−1)/6·S + (z³−3z)/24·K − (2z³−5z)/36·S²
+  VaR  = −(μ + σ·z_cf)
+  ```
+- **Student-t VaR** — parametric VaR under a t-distribution (`ν=5`), quantile rescaled by
+  `sqrt((ν−2)/ν)` so its variance equals `σ_p²`.
+
+## 17. Regime-conditional risk attribution
+
+The critique "MCTR is the same regardless of scenario" is addressed by computing risk
+contributions under **both** the calm (full-sample, shrunk) covariance **and** a
+**crisis-regime** covariance estimated on empirically-detected high-stress weeks
+(`regime.py`: weeks whose standardized-return norm exceeds the 85th percentile). The UI shows
+capital %, calm risk %, and crisis risk % side by side, and the commentary reports the
+**shift** in a holding's risk share from calm to crisis — the effect a single-regime model
+cannot see.
+
+## 18. Constrained & top-k reverse stress
+
+The closed-form minimum-Mahalanobis solution is retained as a baseline, but the primary
+result is now a **bounded** solve:
+
+```
+minimize   sᵀ Σ_F⁻¹ s
+subject to gᵀ s = −L*,   lb ≤ s ≤ ub      (SLSQP)
+```
+
+Per-factor bounds (e.g. credit spreads cannot collapse) stop the "most plausible" answer from
+returning economically nonsensical shock combinations. We also return the **top-k
+single-factor narratives** — the pure equity/credit/rates/… paths to the same loss, each with
+its own plausibility (Mahalanobis) score — because a PM thinks in terms of "which one thing
+could do this."
+
+## 19. Backtest validation (out-of-sample)
+
+The factor-shock engine's **predicted** asset returns are compared against **realized**
+documented returns for the 2008 and 2020 windows (`realized_crisis_returns`, loaded
+independently of the model). Per-asset and per-portfolio errors plus MAE/RMSE are reported via
+`/api/backtest`. This is the difference between validating the model against reality and
+validating it against itself.
+
+---
+
+## 20. Limitations (read this before trusting a number)
+
+- **Data are calibrated/synthetic.** Live feeds need a licence and network access. The weekly
+  history is generated to match documented volatilities, fat tails and regime behaviour; the
+  crisis *magnitudes* and *realized* returns are calibrated to documented events. This is a
+  reproducible demonstration, not a fitted production model. The data layer is one file from a
+  real warehouse/feed.
+- **Exposures are static within a regime.** Betas/durations do not continuously vary with the
+  state of the world; we approximate regime dependence with a two-state calm/crisis split, not
+  a full time-varying (e.g. DCC-GARCH) model.
+- **Reverse stress uses a Gaussian plausibility metric** (Mahalanobis). Tail dependence
+  (copulas) would make extreme joint moves look *more* plausible than this suggests.
+- **Scenario shocks are instantaneous** (no path, no compounding); the 1-week VaR and the
+  multi-month scenario drawdown are different horizons and are labelled as such in the UI.
+- **Not investment advice; not a regulatory-grade risk system.**

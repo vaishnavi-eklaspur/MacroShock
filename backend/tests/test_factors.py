@@ -21,11 +21,11 @@ def test_ols_recovers_known_betas():
 def _assets():
     return pd.DataFrame([
         {"ticker": "SPY", "equity_beta": 1.0, "eff_duration": 0.0, "spread_duration": 0.0,
-         "commodity_beta": 0.1, "convexity": 0.0},
+         "commodity_beta": 0.1, "liquidity_beta": 0.3, "fx_beta": -0.1, "convexity": 0.0},
         {"ticker": "IEF", "equity_beta": -0.05, "eff_duration": 7.5, "spread_duration": 0.0,
-         "commodity_beta": 0.0, "convexity": 75.0},
+         "commodity_beta": 0.0, "liquidity_beta": -0.1, "fx_beta": 0.05, "convexity": 75.0},
         {"ticker": "LQD", "equity_beta": 0.2, "eff_duration": 8.4, "spread_duration": 8.4,
-         "commodity_beta": 0.0, "convexity": 95.0},
+         "commodity_beta": 0.0, "liquidity_beta": 0.8, "fx_beta": -0.05, "convexity": 95.0},
     ])
 
 
@@ -42,10 +42,12 @@ def test_scenario_bond_pricing_includes_convexity():
 def test_factor_pnl_sums_to_portfolio_return():
     assets = _assets()
     w = np.array([0.5, 0.3, 0.2])
-    shocks = {"Equity": -0.30, "Rates": -0.01, "Credit": 0.02, "Commodity": -0.10}
+    shocks = {"Equity": -0.30, "Rates": -0.01, "Credit": 0.02, "Commodity": -0.10,
+              "Liquidity": -0.15, "FX": 0.08}
     total = float(w @ fac.scenario_asset_returns(assets, shocks))
     breakdown = fac.factor_pnl_breakdown(assets, w, shocks)
     assert sum(breakdown.values()) == pytest.approx(total)
+    assert set(breakdown) == {"Equity", "Rates", "Credit", "Commodity", "Liquidity", "FX"}
 
 
 def test_exposure_matrix_signs():

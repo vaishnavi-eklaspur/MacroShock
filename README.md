@@ -3,7 +3,7 @@
 **A portfolio consulting co-pilot** — it tells a portfolio manager not just *what* breaks
 under a macro shock, but *why* it breaks, *which holding* is to blame, and *the single trade*
 that reduces the pain. Built around factor-based stress testing, risk attribution, and reverse
-stress testing — the same vocabulary institutional risk platforms (Aladdin-style) use.
+stress testing — the same vocabulary institutional risk platforms use.
 
 > This is an educational/demonstration project. It is **not** investment advice and **not** a
 > regulatory-grade risk system. See [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md).
@@ -12,18 +12,28 @@ stress testing — the same vocabulary institutional risk platforms (Aladdin-sty
 
 ## What makes it different
 
-Most portfolio projects stop at "your portfolio dropped 18%." MacroShock adds three
-institutional-grade capabilities:
+Most portfolio projects stop at "your portfolio dropped 18%." MacroShock adds
+institutional-grade capabilities and — importantly — is built to survive scrutiny:
 
-1. **Factor attribution & risk decomposition (MCTR/CCTR).** Shows that a 40% *capital* weight
-   can be 70% of the *risk*, and pins the loss on specific holdings and macro factors.
-2. **Reverse stress testing.** Solves for the *most plausible* combination of factor shocks
-   that would produce a target loss — a closed-form minimum-Mahalanobis solve.
-3. **Auto-generated investment commentary.** Turns the numbers into a portfolio-manager
-   narrative, deterministically (auditable, no LLM).
+1. **Regime-conditional risk attribution (MCTR/CCTR).** Shows that a 40% *capital* weight can
+   be 70% of the *risk*, and that a holding's risk share **shifts** from the calm regime to
+   the crisis regime as correlations tighten. Pins the loss on specific holdings and factors.
+2. **Reverse stress testing — constrained + top-k.** Solves for the *most plausible* (bounded)
+   combination of factor shocks that produces a target loss, and ranks the top single-factor
+   paths by plausibility.
+3. **Fat-tailed risk.** Gaussian VaR shown next to Historical, Cornish–Fisher (skew/kurtosis)
+   and Student-t VaR/CVaR — because a stress tool that assumes normality is a contradiction.
+4. **Backtest vs. reality.** The factor-shock engine's predictions are compared against
+   **independent, documented** 2008/2020 crisis returns (MAE/RMSE), not against itself.
+5. **Auto-generated investment commentary.** Deterministic, auditable PM-style narrative.
+
+Under the hood: a **6-factor** model (Equity, Rates, Credit, Commodity, **Liquidity, FX**),
+**regime-switching fat-tailed** data generation, **Ledoit–Wolf shrinkage** covariance, OLS
+betas with **t-stats and R²**, pydantic-validated API, and a **model-versioned** cache.
 
 Every formula is documented and independently verified — see
-[`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) and `scripts/verify_math.py`.
+[`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) (including a **Limitations** section) and
+`scripts/verify_math.py`.
 
 ---
 

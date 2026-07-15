@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify-math:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Independent formula verification (stdlib only)
+        run: python scripts/verify_math.py
+
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt ruff
+      - name: Lint (ruff)
+        working-directory: backend
+        run: ruff check . --select E9,F63,F7,F82
+      - name: Seed database
+        working-directory: backend
+        run: python -m data.seed
+      - name: Run tests
+        working-directory: backend
+        run: pytest -q

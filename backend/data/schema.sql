@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS assets (
     eff_duration    REAL    NOT NULL,   -- effective duration (years) -> rates exposure = -eff_duration
     spread_duration REAL    NOT NULL,   -- spread duration (years) -> credit exposure = -spread_duration
     commodity_beta  REAL    NOT NULL,   -- exposure to the Commodity factor
+    liquidity_beta  REAL    NOT NULL DEFAULT 0.0,  -- exposure to the Liquidity factor
+    fx_beta         REAL    NOT NULL DEFAULT 0.0,  -- exposure to the FX (USD) factor
     convexity       REAL    NOT NULL DEFAULT 0.0,  -- bond convexity (for large-shock pricing)
     display_order   INTEGER NOT NULL DEFAULT 0
 );
@@ -59,4 +61,15 @@ CREATE TABLE IF NOT EXISTS scenario_shocks (
     PRIMARY KEY (scenario_id, factor_name),
     FOREIGN KEY (scenario_id) REFERENCES scenarios(scenario_id),
     FOREIGN KEY (factor_name) REFERENCES factors(name)
+);
+
+-- Ground truth: realized asset returns over each historical crisis window. Independent of
+-- the factor model, so model-vs-realized comparison is a genuine backtest, not circular.
+CREATE TABLE IF NOT EXISTS realized_crisis_returns (
+    scenario_id     TEXT NOT NULL,
+    ticker          TEXT NOT NULL,
+    realized_return REAL NOT NULL,
+    PRIMARY KEY (scenario_id, ticker),
+    FOREIGN KEY (scenario_id) REFERENCES scenarios(scenario_id),
+    FOREIGN KEY (ticker) REFERENCES assets(ticker)
 );

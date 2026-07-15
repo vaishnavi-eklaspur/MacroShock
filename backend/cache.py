@@ -13,6 +13,8 @@ import logging
 import os
 from typing import Any, Callable
 
+from data.reference import MODEL_VERSION
+
 logger = logging.getLogger("macroshock.cache")
 
 try:  # redis is optional at runtime
@@ -47,10 +49,15 @@ class Cache:
 
     @staticmethod
     def make_key(prefix: str, payload: dict[str, Any]) -> str:
-        """Deterministic key: stable JSON of the payload, hashed."""
+        """Deterministic key: stable JSON of the payload, hashed, VERSIONED by model.
+
+        The model version is part of the key so that changing the model or reference data
+        invalidates every prior cache entry - a stale (now-wrong) number can never be served
+        under an old hash. This matters in finance.
+        """
         blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=float)
         digest = hashlib.sha256(blob.encode()).hexdigest()[:32]
-        return f"macroshock:{prefix}:{digest}"
+        return f"macroshock:v{MODEL_VERSION}:{prefix}:{digest}"
 
     def get_or_compute(self, prefix: str, payload: dict[str, Any],
                        compute: Callable[[], dict]) -> tuple[dict, bool]:
