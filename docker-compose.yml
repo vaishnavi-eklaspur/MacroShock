@@ -1,6 +1,6 @@
 # MacroShock full stack: Redis + Flask API + Streamlit dashboard.
 # Run:  docker-compose up --build
-# Dashboard: http://localhost:8501   API: http://localhost:5000
+# Dashboard: http://localhost:8501   API: http://localhost:5050   React: http://localhost:5173
 
 services:
   redis:
@@ -21,7 +21,7 @@ services:
       # Uncomment to require an API key on write endpoints:
       # MACROSHOCK_API_KEY: ${MACROSHOCK_API_KEY:-}
     ports:
-      - "5000:5000"
+      - "5050:5000"                    # host 5050 -> container 5000 (5000 clashes with macOS AirPlay / .NET)
     volumes:
       - macroshock-data:/app/dbdata    # DB-only volume (NOT over /app/data code) — survives restarts
     depends_on:
@@ -38,12 +38,12 @@ services:
       - api
 
   # Optional React/TypeScript client (served by nginx). The browser calls the API on
-  # localhost:5000, so the API's CORS must allow http://localhost:5173 (it does by default).
+  # localhost:5050, so the API's CORS must allow http://localhost:5173 (it does by default).
   react:
     build:
       context: ./frontend-react
       args:
-        VITE_API_BASE: http://localhost:5000
+        VITE_API_BASE: http://localhost:5050
     ports:
       - "5173:80"
     depends_on:

@@ -85,7 +85,8 @@ Streamlit dashboard  ──REST──▶  Flask API  ──▶  Redis cache (exp
 docker-compose up --build
 ```
 
-Then open the dashboard at <http://localhost:8501>. The API is at <http://localhost:5000>.
+Then open the dashboard at <http://localhost:8501>. The API is at <http://localhost:5050>,
+and the React/TypeScript client at <http://localhost:5173>.
 
 ### Run locally without Docker
 
@@ -93,7 +94,7 @@ Then open the dashboard at <http://localhost:8501>. The API is at <http://localh
 cd backend
 pip install -r requirements.txt
 python -m data.seed            # build the SQLite database (synthetic, reproducible)
-flask --app app run            # API on :5000  (Redis optional; degrades gracefully)
+flask --app app run -p 5050    # API on :5050  (Redis optional; degrades gracefully)
 
 cd ../frontend
 pip install -r requirements.txt

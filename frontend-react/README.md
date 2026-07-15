@@ -8,11 +8,11 @@ drawdown, factor-attribution bars, commentary).
 ## Run
 
 ```bash
-# 1. Start the backend (from ../backend): flask --app app run   # :5000
+# 1. Start the backend (from ../backend): flask --app app run -p 5050   # :5050
 # 2. Then:
 cd frontend-react
 npm install
-npm run dev        # http://localhost:5173  (Vite proxies /api -> :5000)
+npm run dev        # http://localhost:5173  (Vite proxies /api -> :5050)
 ```
 
 Type-check / production build:

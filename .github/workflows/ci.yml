@@ -50,7 +50,7 @@ jobs:
       - name: Wait for the API to become healthy
         run: |
           for i in $(seq 1 40); do
-            if curl -sf http://localhost:5000/health; then echo; echo "API healthy"; exit 0; fi
+            if curl -sf http://localhost:5050/health; then echo; echo "API healthy"; exit 0; fi
             sleep 3
           done
           echo "API never became healthy"; docker compose logs api; exit 1
