@@ -37,5 +37,17 @@ services:
     depends_on:
       - api
 
+  # Optional React/TypeScript client (served by nginx). The browser calls the API on
+  # localhost:5000, so the API's CORS must allow http://localhost:5173 (it does by default).
+  react:
+    build:
+      context: ./frontend-react
+      args:
+        VITE_API_BASE: http://localhost:5000
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
 volumes:
   macroshock-data:

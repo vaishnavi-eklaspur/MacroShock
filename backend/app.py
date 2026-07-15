@@ -33,6 +33,7 @@ import time
 from collections import defaultdict
 
 from flask import Flask, g, jsonify, request
+from flask_cors import CORS
 from pydantic import ValidationError
 
 from data import database
@@ -56,6 +57,11 @@ logger = logging.getLogger("macroshock.api")
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    # CORS so a browser-hosted client (the React app on another origin) can call the API.
+    # Restrict to CORS_ORIGINS (comma-separated) in prod; '*' is fine for a read API with no
+    # cookies (writes are guarded by the API key, not the browser origin).
+    CORS(app, resources={r"/api/*": {"origins": os.getenv("CORS_ORIGINS", "*").split(",")},
+                         r"/health": {"origins": "*"}})
     engine = MacroShockEngine()
     cache = Cache()
 

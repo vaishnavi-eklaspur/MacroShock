@@ -38,3 +38,26 @@ jobs:
       - name: Run tests
         working-directory: backend
         run: pytest -q
+
+  docker-smoke:
+    # Builds and boots the FULL stack and checks it actually serves - catches things unit
+    # tests can't (e.g. a volume mount that shadows the code, a broken Dockerfile).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the stack
+        run: docker compose up -d --build api dashboard redis
+      - name: Wait for the API to become healthy
+        run: |
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:5000/health; then echo; echo "API healthy"; exit 0; fi
+            sleep 3
+          done
+          echo "API never became healthy"; docker compose logs api; exit 1
+      - name: Check the dashboard responds
+        run: |
+          curl -sf http://localhost:8501/_stcore/health \
+            || { docker compose logs dashboard; exit 1; }
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

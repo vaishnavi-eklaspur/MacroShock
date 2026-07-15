@@ -10,6 +10,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Data dir for the SQLite DB, kept OUT of the code tree (/app/data) so a mounted volume can
+# never shadow the source. MACROSHOCK_DB points here in compose and on Azure.
+RUN mkdir -p /app/dbdata
+
 EXPOSE 5000
 
 # Seed the SQLite database (idempotent) then serve the API with gunicorn.
