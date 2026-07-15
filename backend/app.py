@@ -125,6 +125,24 @@ def create_app() -> Flask:
     def _not_found(exc: KeyError):
         return jsonify({"error": str(exc).strip('"')}), 404
 
+    @app.get("/")
+    def index():
+        # Friendly API index so hitting the base URL in a browser isn't a bare 404.
+        return jsonify({
+            "service": "MacroShock API",
+            "model_version": engine.model_version,
+            "docs": "docs/METHODOLOGY.md, docs/DESIGN_AND_MATH.md",
+            "dashboards": {"streamlit": "http://localhost:8501", "react": "http://localhost:5173"},
+            "endpoints": {
+                "GET": ["/health", "/metrics", "/api/meta", "/api/assets", "/api/scenarios",
+                        "/api/benchmarks", "/api/exposures", "/api/backtest", "/api/portfolios"],
+                "POST": ["/api/portfolio/load", "/api/portfolio/stress-test",
+                         "/api/portfolio/custom-stress-test", "/api/portfolio/active-risk",
+                         "/api/portfolio/reverse-stress-test", "/api/portfolio/rebalance",
+                         "/api/portfolio/risk-contribution", "/api/portfolio/factor-regression"],
+            },
+        })
+
     # ---------------------------------------------------------------- meta / reference
     @app.get("/health")
     def health():
