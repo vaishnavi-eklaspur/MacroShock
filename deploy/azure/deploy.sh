@@ -11,6 +11,12 @@ ACR="${ACR:-macroshock$RANDOM}"          # must be globally unique
 ENV="${ENV:-macroshock-env}"
 API_KEY="${MACROSHOCK_API_KEY:-}"        # optional; if set, write endpoints require it
 
+echo "==> Ensure Container Apps prerequisites (extension + resource providers)"
+az extension add --upgrade -n containerapp -o none 2>/dev/null || true
+az provider register -n Microsoft.App --wait -o none
+az provider register -n Microsoft.OperationalInsights --wait -o none
+az provider register -n Microsoft.ContainerRegistry --wait -o none
+
 echo "==> Resource group + registry + Container Apps environment"
 az group create -n "$RG" -l "$LOC" -o none
 az acr create -n "$ACR" -g "$RG" --sku Basic --admin-enabled true -o none
