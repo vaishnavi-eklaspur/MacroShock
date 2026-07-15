@@ -45,3 +45,39 @@ def test_ledoit_wolf_is_valid_covariance():
     assert 0.0 <= shrink <= 1.0
     assert np.allclose(cov, cov.T)                      # symmetric
     assert np.all(np.linalg.eigvalsh(cov) > -1e-10)     # PSD
+
+
+
+def test_jarque_bera_rejects_fat_tails(fat_tailed_series):
+    jb = pf.jarque_bera(fat_tailed_series)
+    assert jb["normal_rejected"] is True
+    assert jb["p_value"] < 0.05
+
+
+def test_jarque_bera_does_not_reject_normal():
+    rng = np.random.default_rng(2)
+    normal = rng.standard_normal(5000) * 0.01
+    jb = pf.jarque_bera(normal)
+    assert jb["p_value"] > 0.01
+
+
+def test_fit_student_t_dof_low_for_fat_tails(fat_tailed_series):
+    dof = pf.fit_student_t_dof(fat_tailed_series)
+    assert 2.1 <= dof <= 100.0
+    assert dof < 15.0                       # genuinely fat-tailed => low dof
+
+
+def test_cornish_fisher_valid_on_near_normal():
+    rng = np.random.default_rng(4)
+    normal = rng.standard_normal(10000) * 0.01
+    assert pf.cornish_fisher_valid(normal) is True
+
+
+def test_constant_correlation_shrinkage_valid():
+    rng = np.random.default_rng(6)
+    X = rng.standard_normal((150, 5)) * 0.02
+    cov, delta = pf.ledoit_wolf_constant_correlation(X)
+    assert cov.shape == (5, 5)
+    assert 0.0 <= delta <= 1.0
+    assert np.allclose(cov, cov.T)
+    assert np.all(np.linalg.eigvalsh(cov) > -1e-8)

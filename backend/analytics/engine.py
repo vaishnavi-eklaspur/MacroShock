@@ -1,8 +1,8 @@
 """Orchestration engine: composes the analytics over data-layer inputs.
 
-Produces JSON-serializable result dictionaries consumed by the Flask API and Streamlit UI.
-Loads the (expensive) historical data, shrinkage covariance, and regime-conditional
-covariance once and reuses them.
+Produces JSON-serializable result dictionaries for the Flask API and Streamlit UI. Loads the
+expensive objects once: constant-correlation shrinkage covariance, crisis-regime conditional
+covariance (assets and factors), and the exposure matrix.
 """
 from __future__ import annotations
 
@@ -32,14 +32,18 @@ class MacroShockEngine:
         self.asset_returns = asset_rets.to_numpy()
         self.factor_returns = factor_rets.to_numpy()
 
-        # Unconditional (full-sample) covariance with Ledoit-Wolf shrinkage.
-        self.cov, self.shrinkage = portfolio.ledoit_wolf_covariance(self.asset_returns)
-        # Regime-conditional (crisis) covariance - correlations rise under stress.
+        # Unconditional covariance: constant-correlation Ledoit-Wolf shrinkage.
+        self.cov, self.shrinkage = portfolio.ledoit_wolf_constant_correlation(self.asset_returns)
+
+        # Crisis-regime conditional covariances (assets + factors), same detected crisis weeks.
         self.crisis_mask = regime.crisis_mask(self.asset_returns)
-        self.stressed_cov = regime.conditional_covariance(self.asset_returns, self.crisis_mask)
+        self.stressed_cov, self.stressed_fallback = regime.conditional_covariance(
+            self.asset_returns, self.crisis_mask)
+        self.crisis_factor_cov, self.factor_fallback = regime.conditional_covariance(
+            self.factor_returns, self.crisis_mask)
         self.regime_summary = regime.regime_summary(self.asset_returns)
 
-        # Factor covariance for reverse stress.
+        # Full-sample factor covariance (reference) and exposure matrix.
         self.factor_cov = factors.factor_weekly_covariance(self.factor_returns)
         self.exposure = factors.exposure_matrix(self.assets)
 
@@ -48,7 +52,6 @@ class MacroShockEngine:
 
     # ------------------------------------------------------------------ helpers
     def weight_vector(self, weights: dict[str, float]) -> np.ndarray:
-        """Align a {ticker: weight} dict to canonical asset order and normalize."""
         w = np.array([float(weights.get(t, 0.0)) for t in self.tickers])
         return portfolio.normalize_weights(w)
 
@@ -62,7 +65,9 @@ class MacroShockEngine:
         return {
             "model_version": self.model_version,
             "shrinkage_intensity": self.shrinkage,
+            "shrinkage_target": "constant-correlation (Ledoit-Wolf 2003)",
             "regime": self.regime_summary,
+            "crisis_cov_used_fallback": bool(self.stressed_fallback),
             "factors": self.factor_names,
         }
 
@@ -71,6 +76,7 @@ class MacroShockEngine:
         w = self.weight_vector(weights)
         cond = risk.conditional_risk_contributions(w, self.cov, self.stressed_cov)
         calm, stressed = cond["calm"], cond["stressed"]
+        boot = risk.bootstrap_risk_contributions(self.asset_returns, w)
         return {
             "tickers": self.tickers,
             "weights": {t: float(x) for t, x in zip(self.tickers, w)},
@@ -79,32 +85,46 @@ class MacroShockEngine:
             "calm_percentage_contribution": dict(zip(self.tickers, calm.percentage.tolist())),
             "stressed_percentage_contribution": dict(zip(self.tickers, stressed.percentage.tolist())),
             "pctr_shift": dict(zip(self.tickers, cond["pctr_shift"].tolist())),
+            "pctr_confidence_interval": {
+                t: {"point": float(p), "lower": float(lo), "upper": float(hi)}
+                for t, p, lo, hi in zip(self.tickers, boot["point"], boot["lower"], boot["upper"])
+            },
+            "pctr_ci_confidence": boot["confidence"],
             "euler_residual": stressed.euler_check(),
+            "crisis_cov_used_fallback": bool(self.stressed_fallback),
         }
 
-    def factor_regression(self, weights: dict[str, float]) -> dict:
+    def factor_regression(self, weights: dict[str, float], ridge_lambda: float = 0.0) -> dict:
         w = self.weight_vector(weights)
         port_series = self.asset_returns @ w
-        reg = factors.ols_factor_betas(port_series, self.factor_returns, self.factor_names)
+        reg = factors.ols_factor_betas(port_series, self.factor_returns, self.factor_names,
+                                       ridge_lambda=ridge_lambda)
         return {
             "alpha": reg.alpha, "alpha_t_stat": reg.alpha_t_stat,
             "betas": reg.betas, "t_stats": reg.t_stats, "std_errors": reg.std_errors,
             "r_squared": reg.r_squared, "adj_r_squared": reg.adj_r_squared,
+            "vif": reg.vif, "condition_number": reg.condition_number,
+            "ridge_lambda": reg.ridge_lambda,
         }
 
     def _var_suite(self, w: np.ndarray, alpha: float) -> dict:
-        sigma = portfolio.portfolio_volatility(w, self.cov)  # weekly, unconditional
-        series = self.asset_returns @ w
+        sigma = portfolio.portfolio_volatility(w, self.cov)   # weekly, unconditional
+        series = self.asset_returns @ w                       # computed once
         moments = portfolio.sample_moments(series)
+        fitted_dof = portfolio.fit_student_t_dof(series)
+        cf_valid = portfolio.cornish_fisher_valid(series)
         return {
             "horizon": "weekly",
             "confidence": alpha,
             "volatility_weekly": sigma,
             "volatility_annual": portfolio.annualize_volatility(sigma),
             "moments": moments,
+            "fitted_student_t_dof": fitted_dof,
+            "normality_test": portfolio.jarque_bera(series),
+            "cornish_fisher_valid": cf_valid,
             "var": {
                 "gaussian": portfolio.parametric_var(sigma, alpha),
-                "student_t": portfolio.student_t_var(sigma, alpha, dof=5.0),
+                "student_t": portfolio.student_t_var(sigma, alpha, dof=fitted_dof),
                 "cornish_fisher": portfolio.cornish_fisher_var(series, alpha),
                 "historical": portfolio.historical_var(series, alpha),
             },
@@ -122,20 +142,17 @@ class MacroShockEngine:
         shocks = scenario["shocks"]
         w = self.weight_vector(weights)
 
-        # Scenario pricing.
         asset_scn = factors.scenario_asset_returns(self.assets, shocks)
         portfolio_drawdown = float(w @ asset_scn)
         factor_pnl = factors.factor_pnl_breakdown(self.assets, w, shocks)
 
-        # Risk metrics (fat-tailed suite) + regime-conditional attribution.
         var_suite = self._var_suite(w, alpha)
         cond = risk.conditional_risk_contributions(w, self.cov, self.stressed_cov)
         calm_rc, stressed_rc = cond["calm"], cond["stressed"]
 
-        # Mitigation uses the STRESSED covariance so the vol improvement is scenario-relevant.
-        rec = rebalance.recommend_rebalance(w, self.tickers, asset_scn, self.stressed_cov)
+        # Constrained-optimization mitigation on the crisis-regime covariance.
+        opt = rebalance.optimize_rebalance(w, self.tickers, asset_scn, self.stressed_cov)
 
-        # Worst holding by CRISIS-regime risk share (this is what "to blame" means in a crisis).
         stressed_pctr = stressed_rc.percentage
         worst_idx = int(np.argmax(stressed_pctr))
 
@@ -149,7 +166,7 @@ class MacroShockEngine:
             worst_holding_pctr_shift=float(cond["pctr_shift"][worst_idx]),
             var_gaussian=var_suite["var"]["gaussian"],
             var_historical=var_suite["var"]["historical"],
-            rebalance=rec,
+            rebalance=opt,
         )
 
         return {
@@ -167,14 +184,16 @@ class MacroShockEngine:
                 "stressed_percentage": dict(zip(self.tickers, stressed_pctr.tolist())),
                 "pctr_shift": dict(zip(self.tickers, cond["pctr_shift"].tolist())),
             },
-            "rebalance": _rebalance_dict(rec),
+            "rebalance": _optimized_rebalance_dict(opt),
             "commentary": narrative,
         }
 
     def reverse_stress(self, weights: dict[str, float], target_loss: float) -> dict:
         w = self.weight_vector(weights)
+        # Use the CRISIS-regime factor covariance so plausibility is measured in the same
+        # regime as the risk attribution (internally consistent).
         res = reverse.reverse_stress(
-            weights=w, exposure_matrix=self.exposure, factor_cov=self.factor_cov,
+            weights=w, exposure_matrix=self.exposure, factor_cov=self.crisis_factor_cov,
             target_loss=target_loss, factor_names=self.factor_names,
         )
         narrative = commentary.reverse_commentary(
@@ -184,15 +203,11 @@ class MacroShockEngine:
             top_alternative=res.alternatives[0] if res.alternatives else None,
         )
         return {
-            "shocks": res.shocks,
-            "unconstrained_shocks": res.unconstrained_shocks,
-            "gradient": res.gradient,
-            "target_loss": res.target_loss,
-            "implied_loss": res.implied_loss,
-            "mahalanobis_distance": res.mahalanobis_distance,
-            "constrained": res.constrained,
-            "alternatives": res.alternatives,
-            "factor_order": res.factor_order,
+            "shocks": res.shocks, "unconstrained_shocks": res.unconstrained_shocks,
+            "gradient": res.gradient, "target_loss": res.target_loss,
+            "implied_loss": res.implied_loss, "mahalanobis_distance": res.mahalanobis_distance,
+            "constrained": res.constrained, "alternatives": res.alternatives,
+            "factor_order": res.factor_order, "covariance_regime": "crisis",
             "commentary": narrative,
         }
 
@@ -200,14 +215,12 @@ class MacroShockEngine:
         return backtest_mod.backtest_all(self.assets, self.tickers, self.scenarios, self.realized)
 
 
-def _rebalance_dict(rec) -> dict:
-    """Explicit serialization of the rebalance recommendation (no __dict__ leakage)."""
+def _optimized_rebalance_dict(rec) -> dict:
     return {
-        "applied": rec.applied, "reason": rec.reason,
-        "from_ticker": rec.from_ticker, "to_ticker": rec.to_ticker, "shift": rec.shift,
+        "applied": rec.applied, "method": rec.method, "reason": rec.method,
         "old_weights": rec.old_weights, "new_weights": rec.new_weights,
         "old_drawdown": rec.old_drawdown, "new_drawdown": rec.new_drawdown,
         "drawdown_improvement": rec.drawdown_improvement,
         "old_volatility": rec.old_volatility, "new_volatility": rec.new_volatility,
-        "volatility_change": rec.volatility_change,
+        "volatility_change": rec.volatility_change, "turnover": rec.turnover,
     }

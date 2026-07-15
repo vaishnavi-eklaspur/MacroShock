@@ -395,3 +395,116 @@ validating it against itself.
 - **Scenario shocks are instantaneous** (no path, no compounding); the 1-week VaR and the
   multi-month scenario drawdown are different horizons and are labelled as such in the UI.
 - **Not investment advice; not a regulatory-grade risk system.**
+
+
+
+---
+
+# Part III — v3.0 Upgrades (closing the review loopholes)
+
+This part addresses the specific critiques a quant reviewer raises against v2: circular
+backtest, planted-then-discovered tails, selection-biased regime detection, regime-
+inconsistent reverse stress, unidentified collinear factors, i.i.d. crises, an identity
+shrinkage target, a heuristic rebalance, missing error bars, and no path to real data.
+
+## 21. Out-of-sample backtest with skill (was: circular calibration check)
+
+The v2 backtest compared hand-calibrated shocks to the realized returns they were calibrated
+to — a consistency check, not a forecast. v3 adds a **leave-one-crisis-out** test:
+
+1. **Implied shocks:** invert one crisis's realized returns into factor space,
+   `s = argmin_s ‖B_sub s − r‖` (least squares through the exposure matrix).
+2. Use shocks implied from the **other** crises to predict the **held-out** crisis; its
+   realized returns never enter the prediction.
+3. Score against three naive benchmarks — **predict-zero**, **repeat-last-crisis**, and
+   **equity-factor-only** — and report a **skill ratio** `1 − RMSE_model / RMSE_benchmark`.
+
+Positive skill means the factor model genuinely beats the naive rule. With only two crisis
+windows this is indicative, not conclusive, and is labelled as such. The in-sample check is
+retained but explicitly marked "not a skill test."
+
+## 22. Chi-square regime detection (was: top-x% selection bias)
+
+A top-15% quantile rule flags 15% of weeks as "crisis" on *any* data, including pure calm
+noise — selection bias. v3 uses a **statistical test**: the squared Mahalanobis distance of a
+week's standardized returns is `~ χ²(n)` under multivariate normality. Weeks exceeding the
+`χ²(n)` critical value at level `p` (default 0.99) are crises. On genuinely calm/normal data
+this flags only ~`(1−p)` of weeks (almost none); a regime is detected only if the data has
+one. The level relaxes step-wise only if too few weeks are captured to estimate a covariance,
+and the achieved rate is reported.
+
+## 23. Persistent (Markov) crisis generation (was: i.i.d. crises)
+
+Crises cluster (volatility clustering). v3 generates the regime path as a **2-state Markov
+chain** with `P(crisis→crisis)=0.80` (≈5-week average crisis spells), with `P(calm→crisis)`
+solved so the stationary crisis probability equals the target 12%. This produces contiguous
+crisis episodes rather than isolated single-week spikes.
+
+## 24. Constant-correlation shrinkage (was: identity target)
+
+Shrinking toward a scaled identity pulls correlations to zero — backwards for a tool whose
+thesis is that correlations matter. v3 uses the **Ledoit–Wolf (2003) constant-correlation
+target**: each asset keeps its own variance and all pairwise correlations shrink toward the
+average sample correlation. Optimal intensity `δ = κ/T` with the full `π, ρ, γ` estimators.
+
+## 25. Regime-consistent reverse stress (was: calm covariance for a crisis question)
+
+Reverse stress now measures shock plausibility (Mahalanobis distance) against the
+**crisis-regime factor covariance**, the same regime used for risk attribution — so a
+crisis-sized shock is judged against crisis-time co-movement, not calm-blended co-movement.
+
+## 26. Multicollinearity diagnostics (was: unidentified collinear factors)
+
+Adding Liquidity/FX created collinearity (crisis Credit–Liquidity ≈ −0.8). v3 reports, per
+factor, the **Variance Inflation Factor** (diagonal of the inverse correlation matrix) and the
+**condition number** of the factor set, so unstable/under-identified coefficients are visible.
+A **ridge** option (`λ>0`, intercept unpenalized, sandwich standard errors) is available to
+stabilize betas.
+
+## 27. Statistical tail evidence (was: asserted fat tails)
+
+Instead of asserting fat tails, v3 reports the **Jarque–Bera** normality test (statistic +
+p-value), an **MLE-fitted Student-t dof** used to parameterize the t-VaR, and a
+**Cornish–Fisher validity flag** (whether the CF quantile map is monotone in the tail; if not,
+the UI defers to historical VaR). The evidence for non-normality is now measured, not claimed.
+
+## 28. MCTR confidence intervals (was: false precision)
+
+Risk contributions are reported with **block-bootstrap** percentile intervals: overlapping
+blocks of the return history are resampled (preserving short-run autocorrelation), PCTR is
+recomputed on each resample, and a 90% interval per holding is reported alongside the point
+estimate.
+
+## 29. Constrained-optimization rebalance (was: greedy single shift)
+
+The mitigation is now a genuine constrained optimization (SLSQP):
+`minimize wᵀΣ_crisis w` subject to `Σw=1`, long-only, a per-asset turnover cap, and
+`rᵀw ≥ rᵀw₀` (scenario drawdown not worsened). It reports the optimized weights, the
+volatility change, and the turnover.
+
+## 30. Real-data path (the one residual)
+
+`data/providers.py` defines a `ReturnsProvider` interface with three implementations:
+`DatabaseProvider` (default, reproducible), `CsvReturnsProvider` (export real returns to CSV
+and point the engine at it), and an import-guarded `YFinanceReturnsProvider` (live data when a
+network and `yfinance` are available). Swapping data sources requires no analytics change.
+
+---
+
+## 31. Limitations (v3 — what genuinely remains)
+
+Most v2 limitations are now addressed (regimes persist and are detected statistically; tails
+are tested; attribution has error bars; reverse stress is regime-consistent; the backtest is
+out-of-sample; multicollinearity is disclosed). What remains:
+
+- **The shipped dataset is still synthetic.** There is no network in the build environment to
+  pull a licensed feed, so the history is calibrated/simulated (to documented vols, fat tails,
+  and regime behaviour) and crisis magnitudes/realized returns are calibrated to documented
+  events. This is the honest ceiling of a self-contained demo. It is **one provider swap** from
+  real data (`CsvReturnsProvider` / `YFinanceReturnsProvider`), and no analytics assume the
+  data is synthetic.
+- **Only two crisis windows** exist for the out-of-sample test, so the skill score is
+  indicative, not statistically conclusive.
+- **Exposures are static within a regime** (two-state calm/crisis), not a continuous
+  time-varying (DCC-GARCH) model.
+- **Not investment advice; not a regulatory-grade risk system.**

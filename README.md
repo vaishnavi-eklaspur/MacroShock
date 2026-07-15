@@ -28,8 +28,13 @@ institutional-grade capabilities and — importantly — is built to survive scr
 5. **Auto-generated investment commentary.** Deterministic, auditable PM-style narrative.
 
 Under the hood: a **6-factor** model (Equity, Rates, Credit, Commodity, **Liquidity, FX**),
-**regime-switching fat-tailed** data generation, **Ledoit–Wolf shrinkage** covariance, OLS
-betas with **t-stats and R²**, pydantic-validated API, and a **model-versioned** cache.
+**persistent (Markov) regime-switching** fat-tailed data, **constant-correlation Ledoit–Wolf**
+shrinkage, **chi-square regime detection** (no top-x% selection bias), **regime-conditional**
+risk attribution with **bootstrap confidence intervals**, **out-of-sample** cross-crisis
+backtesting with a **skill score**, a **Jarque–Bera** normality test with an **MLE-fitted
+Student-t** dof, **VIF / condition-number** multicollinearity diagnostics, a **constrained
+(SLSQP) optimizer** rebalance, a pluggable **real-data provider** interface, pydantic-validated
+API, and a **model-versioned** cache.
 
 Every formula is documented and independently verified — see
 [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) (including a **Limitations** section) and

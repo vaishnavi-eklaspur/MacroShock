@@ -56,3 +56,28 @@ def test_exposure_matrix_signs():
     # Rates column = -eff_duration ; Credit column = -spread_duration
     assert B[1, 1] == pytest.approx(-7.5)
     assert B[2, 2] == pytest.approx(-8.4)
+
+
+
+def test_vif_detects_collinearity():
+    rng = np.random.default_rng(9)
+    base = rng.standard_normal(1000)
+    f1 = base + rng.standard_normal(1000) * 0.05      # f1, f2 nearly collinear
+    f2 = base + rng.standard_normal(1000) * 0.05
+    f3 = rng.standard_normal(1000)
+    F = np.column_stack([f1, f2, f3])
+    vif = fac.variance_inflation_factors(F, ["A", "B", "C"])
+    assert vif["A"] > 5 and vif["B"] > 5      # collinear pair inflated
+    assert vif["C"] < 2                        # independent factor fine
+    assert fac.factor_condition_number(F) > fac.factor_condition_number(
+        rng.standard_normal((1000, 3)))
+
+
+def test_ridge_shrinks_coefficients():
+    rng = np.random.default_rng(10)
+    F = rng.standard_normal((500, 2)) * 0.02
+    y = 0.8 * F[:, 0] - 1.2 * F[:, 1] + rng.standard_normal(500) * 1e-3
+    ols = fac.ols_factor_betas(y, F, ["X", "Y"], ridge_lambda=0.0)
+    ridge = fac.ols_factor_betas(y, F, ["X", "Y"], ridge_lambda=10.0)
+    assert abs(ridge.betas["X"]) <= abs(ols.betas["X"]) + 1e-9
+    assert ridge.ridge_lambda == 10.0

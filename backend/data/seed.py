@@ -26,6 +26,7 @@ from .reference import (
     ASSETS,
     CALM_CORRELATIONS,
     CRISIS_CORRELATIONS,
+    CRISIS_STAY_PROB,
     CRISIS_VOL_MULTIPLIER,
     CRISIS_WEEK_FRACTION,
     FACTOR_ORDER,
@@ -95,14 +96,42 @@ def _multivariate_t(rng: np.random.Generator, cov: np.ndarray, dof: float, n: in
     return (z @ L.T) / np.sqrt(w)[:, None]
 
 
+def _markov_regime(rng: np.random.Generator) -> np.ndarray:
+    """2-state Markov regime path (0=calm, 1=crisis) with persistence.
+
+    P(crisis->crisis) = CRISIS_STAY_PROB. P(calm->crisis) is solved so the stationary crisis
+    probability equals CRISIS_WEEK_FRACTION: pi = (1-a)/((1-a)+(1-b)).
+    """
+    b = CRISIS_STAY_PROB
+    pi = CRISIS_WEEK_FRACTION
+    # solve (1-a) from pi = (1-a)/((1-a)+(1-b))
+    one_minus_b = 1.0 - b
+    one_minus_a = pi * one_minus_b / (1.0 - pi)
+    a = 1.0 - one_minus_a            # P(calm->calm)
+    p_calm_to_crisis = one_minus_a
+    p_crisis_to_crisis = b
+
+    states = np.zeros(N_WEEKS, dtype=int)
+    state = 0
+    for t in range(N_WEEKS):
+        if state == 0:
+            state = 1 if rng.random() < p_calm_to_crisis else 0
+        else:
+            state = 1 if rng.random() < p_crisis_to_crisis else 0
+        states[t] = state
+    return states
+
+
 def _generate_returns() -> tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
     rng = np.random.default_rng(RANDOM_SEED)
 
     calm_cov = _weekly_cov(CALM_CORRELATIONS, 1.0)
     crisis_cov = _weekly_cov(CRISIS_CORRELATIONS, CRISIS_VOL_MULTIPLIER)
 
-    # Regime path: independent Bernoulli per week (simple, transparent). 1 == crisis.
-    regime = (rng.random(N_WEEKS) < CRISIS_WEEK_FRACTION).astype(int)
+    # Regime path: a 2-state Markov chain so crises PERSIST and cluster (volatility
+    # clustering), rather than appearing as isolated i.i.d. spikes. Transition probabilities
+    # are set so the crisis regime persists (stay-prob) yet has the target long-run share.
+    regime = _markov_regime(rng)
 
     factor_returns = np.zeros((N_WEEKS, len(FACTOR_ORDER)))
     calm_idx = np.where(regime == 0)[0]

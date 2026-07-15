@@ -5,6 +5,7 @@ All formulas are specified in docs/METHODOLOGY.md sections 2-4.
 from __future__ import annotations
 
 import numpy as np
+from scipy.stats import jarque_bera as _jarque_bera
 from scipy.stats import kurtosis, norm, skew
 from scipy.stats import t as student_t
 
@@ -116,8 +117,50 @@ def student_t_var(sigma_p: float, alpha: float = 0.95, dof: float = 5.0,
     The t-quantile is rescaled by sqrt((dof-2)/dof) so the distribution's std equals sigma_p.
     """
     drift = mu if include_drift else 0.0
+    dof = max(dof, 2.05)
     q = float(student_t.ppf(1.0 - alpha, dof)) * np.sqrt((dof - 2.0) / dof)
     return float(-(drift + sigma_p * q))
+
+
+def fit_student_t_dof(portfolio_returns: np.ndarray) -> float:
+    """MLE-fit the Student-t degrees of freedom to the return series.
+
+    Reporting the *fitted* dof (rather than a hard-coded guess) lets the tail model be
+    driven by the data. Clipped to a sensible range for numerical stability.
+    """
+    r = np.asarray(portfolio_returns, dtype=float)
+    try:
+        dof, _loc, _scale = student_t.fit(r)
+        if not np.isfinite(dof):
+            return 30.0
+        return float(min(max(dof, 2.1), 100.0))
+    except Exception:
+        return 30.0
+
+
+def jarque_bera(portfolio_returns: np.ndarray) -> dict[str, float]:
+    """Jarque-Bera test of normality: statistic + p-value.
+
+    A small p-value rejects normality (fat tails / skew) - the statistical evidence that
+    Gaussian VaR is inadequate, rather than an asserted claim.
+    """
+    r = np.asarray(portfolio_returns, dtype=float)
+    stat, p = _jarque_bera(r)
+    return {"statistic": float(stat), "p_value": float(p), "normal_rejected": bool(p < 0.05)}
+
+
+def cornish_fisher_valid(portfolio_returns: np.ndarray) -> bool:
+    """Whether the Cornish-Fisher quantile map is monotone (its validity domain).
+
+    The CF expansion is only a valid quantile transform where dz_cf/dz > 0 across the tail.
+    Outside that region the modified VaR is unreliable; we flag it so the UI can fall back
+    to historical VaR.
+    """
+    m = sample_moments(portfolio_returns)
+    S, K = m["skew"], m["excess_kurtosis"]
+    zs = np.linspace(-3.5, -0.3, 60)
+    deriv = 1 + (2 * zs) / 6 * S + (3 * zs**2 - 3) / 24 * K - (6 * zs**2 - 5) / 36 * S**2
+    return bool(np.all(deriv > 0))
 
 
 # --------------------------------------------------------------------- robust covariance
@@ -146,3 +189,58 @@ def ledoit_wolf_covariance(returns: np.ndarray) -> tuple[np.ndarray, float]:
     # rescale from /T (MLE) to /(T-1) (unbiased) for consistency with covariance_matrix
     sigma *= T / (T - 1)
     return sigma, float(shrink)
+
+
+def ledoit_wolf_constant_correlation(returns: np.ndarray) -> tuple[np.ndarray, float]:
+    """Ledoit-Wolf (2003) shrinkage toward the CONSTANT-CORRELATION target.
+
+    The standard choice for asset-return covariance: the target `F` keeps each asset's own
+    variance and sets every pairwise correlation to the sample average correlation `r_bar`.
+    This preserves the fact that assets are correlated (unlike an identity target that shrinks
+    correlations to zero), which matters for a risk tool. Optimal intensity per L&W (2003).
+
+    Returns (Sigma_shrunk, shrinkage_intensity).
+    """
+    X = np.asarray(returns, dtype=float)
+    T, n = X.shape
+    Xc = X - X.mean(axis=0)
+    S = (Xc.T @ Xc) / T
+    var = np.diag(S).copy()
+    std = np.sqrt(var)
+    outer_std = np.outer(std, std)
+    corr = S / outer_std
+    # average off-diagonal correlation
+    r_bar = (corr.sum() - n) / (n * (n - 1)) if n > 1 else 0.0
+
+    # constant-correlation target
+    F = r_bar * outer_std
+    np.fill_diagonal(F, var)
+
+    # pi: asymptotic variances of sample covariance entries
+    pi_mat = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            pi_mat[i, j] = np.mean((Xc[:, i] * Xc[:, j] - S[i, j]) ** 2)
+    pi_hat = float(pi_mat.sum())
+
+    # rho: asymptotic covariances between target and sample estimators
+    rho_diag = float(np.trace(pi_mat))
+    rho_off = 0.0
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+            theta_ii = np.mean((Xc[:, i] ** 2 - S[i, i]) * (Xc[:, i] * Xc[:, j] - S[i, j]))
+            theta_jj = np.mean((Xc[:, j] ** 2 - S[j, j]) * (Xc[:, i] * Xc[:, j] - S[i, j]))
+            rho_off += (r_bar / 2.0) * (np.sqrt(var[j] / var[i]) * theta_ii
+                                        + np.sqrt(var[i] / var[j]) * theta_jj)
+    rho_hat = rho_diag + rho_off
+
+    gamma_hat = float(np.sum((F - S) ** 2))
+    kappa = (pi_hat - rho_hat) / gamma_hat if gamma_hat > 0 else 0.0
+    delta = max(0.0, min(1.0, kappa / T))
+
+    sigma = delta * F + (1.0 - delta) * S
+    sigma *= T / (T - 1)                       # unbiased scaling
+    sigma = (sigma + sigma.T) / 2.0            # enforce symmetry
+    return sigma, float(delta)

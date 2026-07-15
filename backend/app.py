@@ -27,7 +27,7 @@ from pydantic import ValidationError
 
 from analytics import factors as factors_mod
 from analytics import rebalance as rebalance_mod
-from analytics.engine import MacroShockEngine, _rebalance_dict
+from analytics.engine import MacroShockEngine, _optimized_rebalance_dict
 from cache import Cache
 from schemas import RebalanceRequest, ReverseRequest, StressRequest, WeightsRequest
 
@@ -147,8 +147,8 @@ def create_app() -> Flask:
         w = engine.weight_vector(req.weights)
         shocks = engine.scenarios[req.scenario_id]["shocks"]
         asset_scn = factors_mod.scenario_asset_returns(engine.assets, shocks)
-        rec = rebalance_mod.recommend_rebalance(w, engine.tickers, asset_scn, engine.stressed_cov)
-        return jsonify(_rebalance_dict(rec))
+        rec = rebalance_mod.optimize_rebalance(w, engine.tickers, asset_scn, engine.stressed_cov)
+        return jsonify(_optimized_rebalance_dict(rec))
 
     return app
 

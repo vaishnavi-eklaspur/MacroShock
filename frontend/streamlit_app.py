@@ -1,8 +1,9 @@
 """MacroShock dashboard (Streamlit).
 
-A portfolio consulting co-pilot: what breaks, why, which holding is to blame (regime-aware),
-how fat the tail is, the single trade that helps - plus reverse stress testing and a
-backtest of the engine against realized 2008/2020 returns.
+A portfolio consulting co-pilot: what breaks, why (regime-aware), which holding is to blame
+(with confidence intervals), how fat the tail is (with a normality test), the optimized trade
+that helps, reverse stress in the crisis regime, and an out-of-sample backtest with a skill
+score against naive benchmarks.
 """
 from __future__ import annotations
 
@@ -20,13 +21,13 @@ st.set_page_config(page_title="MacroShock", page_icon="⚡", layout="wide")
 
 @st.cache_data(ttl=60)
 def api_get(path: str) -> dict:
-    r = requests.get(f"{API_BASE}{path}", timeout=15)
+    r = requests.get(f"{API_BASE}{path}", timeout=30)
     r.raise_for_status()
     return r.json()
 
 
 def api_post(path: str, payload: dict) -> dict:
-    r = requests.post(f"{API_BASE}{path}", json=payload, timeout=20)
+    r = requests.post(f"{API_BASE}{path}", json=payload, timeout=30)
     if r.status_code >= 400:
         raise RuntimeError(r.json().get("error", r.text))
     return r.json()
@@ -70,12 +71,14 @@ scenario_id = st.sidebar.selectbox("Stress scenario", list(scenario_labels.keys(
 confidence = st.sidebar.select_slider("VaR confidence", [0.90, 0.95, 0.975, 0.99], value=0.95)
 
 st.sidebar.divider()
-st.sidebar.caption(f"Model v{meta['model_version']} · shrinkage "
-                   f"{meta['shrinkage_intensity']:.2f} · crisis-regime vol "
-                   f"{meta['regime']['vol_amplification']:.1f}x calm")
+rg = meta["regime"]
+st.sidebar.caption(f"Model v{meta['model_version']} · {meta['shrinkage_target'].split('(')[0].strip()} "
+                   f"shrinkage δ={meta['shrinkage_intensity']:.2f}")
+st.sidebar.caption(f"Regime: {rg['n_crisis_weeks']}/{rg['n_weeks']} crisis weeks detected, "
+                   f"vol {rg['vol_amplification']:.1f}× calm")
 
 tab_stress, tab_reverse, tab_backtest, tab_model = st.tabs(
-    ["Stress test", "Reverse stress", "Backtest (vs realized)", "Model & factors"])
+    ["Stress test", "Reverse stress", "Backtest (out-of-sample)", "Model & diagnostics"])
 
 # ================================================================ STRESS TEST
 with tab_stress:
@@ -90,7 +93,7 @@ with tab_stress:
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Scenario drawdown", pct(result["portfolio_drawdown"]),
-              help="Instantaneous peak-to-trough shock (not annualized).")
+              help="Instantaneous shock, not annualized.")
     c2.metric(f"Historical VaR ({confidence:.0%}, 1wk)", pct(riskd["var"]["historical"]))
     c3.metric(f"Gaussian VaR ({confidence:.0%}, 1wk)", pct(riskd["var"]["gaussian"]))
     c4.metric("Annualized vol", pct(riskd["volatility_annual"]))
@@ -109,7 +112,6 @@ with tab_stress:
         fig = px.bar(fdf, x="Factor", y="P&L %", color="P&L %", color_continuous_scale="RdYlGn")
         fig.update_layout(showlegend=False, coloraxis_showscale=False, height=360)
         st.plotly_chart(fig, use_container_width=True)
-
     with right:
         st.subheader("Risk share: calm vs. crisis regime")
         rc = result["risk_contribution"]
@@ -125,13 +127,13 @@ with tab_stress:
         fig2.add_bar(name="Risk % (crisis)", x=comp["Ticker"], y=comp["Risk % (crisis)"])
         fig2.update_layout(barmode="group", height=360)
         st.plotly_chart(fig2, use_container_width=True)
-        st.caption("Risk share shifts from calm to crisis because correlations tighten in stress "
-                   "— the effect a single-regime model misses.")
 
     st.subheader("Tail check: VaR under different distributional assumptions")
     var = riskd["var"]
+    jb = riskd["normality_test"]
+    dof = riskd["fitted_student_t_dof"]
     vardf = pd.DataFrame({
-        "Method": ["Gaussian", "Student-t (ν=5)", "Cornish-Fisher", "Historical"],
+        "Method": ["Gaussian", f"Student-t (fitted ν={dof:.1f})", "Cornish-Fisher", "Historical"],
         f"1-week VaR ({confidence:.0%})": [var["gaussian"] * 100, var["student_t"] * 100,
                                             var["cornish_fisher"] * 100, var["historical"] * 100],
     })
@@ -139,9 +141,11 @@ with tab_stress:
     figv.update_layout(showlegend=False, height=320)
     st.plotly_chart(figv, use_container_width=True)
     m = riskd["moments"]
-    st.caption(f"Return skew {m['skew']:.2f}, excess kurtosis {m['excess_kurtosis']:.2f}. "
-               f"When kurtosis > 0, Gaussian VaR understates the tail — hence the fatter "
-               f"historical / Cornish-Fisher figures.")
+    normal_txt = "REJECTS normality" if jb["normal_rejected"] else "cannot reject normality"
+    cf_txt = "" if riskd["cornish_fisher_valid"] else " (Cornish-Fisher outside its validity domain — rely on historical)"
+    st.caption(f"Skew {m['skew']:.2f}, excess kurtosis {m['excess_kurtosis']:.2f}. "
+               f"Jarque-Bera p={jb['p_value']:.3g} → {normal_txt}. Fitted Student-t ν={dof:.1f}."
+               f"{cf_txt}")
 
     st.subheader("Per-holding scenario impact")
     pas, pnl = result["per_asset_scenario_return"], result["per_asset_pnl_contribution"]
@@ -150,27 +154,33 @@ with tab_stress:
         "Weight": [f"{weights[t]*100:.1f}%" for t in tickers],
         "Scenario return": [f"{pas[t]*100:.1f}%" for t in tickers],
         "P&L contribution": [f"{pnl[t]*100:.2f}%" for t in tickers],
-        "Risk % (crisis)": [f"{result['risk_contribution']['stressed_percentage'][t]*100:.1f}%"
-                             for t in tickers],
+        "Risk % (crisis)": [f"{rc['stressed_percentage'][t]*100:.1f}%" for t in tickers],
     }), use_container_width=True, hide_index=True)
 
     reb = result["rebalance"]
-    st.subheader("🔧 Recommended mitigation")
+    st.subheader("🔧 Recommended mitigation (constrained optimization)")
     if reb["applied"]:
         r1, r2, r3 = st.columns(3)
-        r1.metric("Trade", f"{reb['from_ticker']} → {reb['to_ticker']}", f"{reb['shift']*100:.0f}%")
-        r2.metric("Drawdown", pct(reb["new_drawdown"]),
-                  f"{reb['drawdown_improvement']*100:+.2f}%")
-        r3.metric("Crisis volatility", pct(reb["new_volatility"]),
-                  f"{reb['volatility_change']*100:+.2f}%")
-    st.write(reb["reason"])
+        r1.metric("Crisis volatility", pct(reb["new_volatility"]), f"{reb['volatility_change']*100:+.2f}%")
+        r2.metric("Scenario drawdown", pct(reb["new_drawdown"]), f"{reb['drawdown_improvement']*100:+.2f}%")
+        r3.metric("Turnover", pct(reb["turnover"]))
+        st.caption(reb["method"])
+        wd = pd.DataFrame({
+            "Ticker": tickers,
+            "Current": [f"{reb['old_weights'][t]*100:.1f}%" for t in tickers],
+            "Optimized": [f"{reb['new_weights'][t]*100:.1f}%" for t in tickers],
+        })
+        st.dataframe(wd, use_container_width=True, hide_index=True)
+    else:
+        st.write("The constrained optimizer finds no turnover-limited trade that reduces crisis "
+                 "risk without worsening the scenario — the allocation is already efficient here.")
 
 # ================================================================ REVERSE STRESS
 with tab_reverse:
-    st.subheader("🔄 Reverse stress testing")
-    st.caption("Instead of 'what happens in 2008?', ask: **what would make me lose X?** "
-               "We solve for the most *plausible* factor shock (within economic bounds) and "
-               "also show the top single-factor paths.")
+    st.subheader("🔄 Reverse stress testing (crisis-regime plausibility)")
+    st.caption("What would make me lose X? We solve for the most *plausible* factor shock "
+               "(bounded, measured against the **crisis-regime** covariance) and rank the top "
+               "single-factor paths.")
     target = st.slider("Target portfolio loss", 0.05, 0.50, 0.20, 0.01, format="%.0f%%")
     try:
         rev = api_post("/api/portfolio/reverse-stress-test",
@@ -187,79 +197,110 @@ with tab_reverse:
             "Implied shock": [f"{v*1e4:+.0f}bps" if k in ("Rates", "Credit") else f"{v*100:+.1f}%"
                               for k, v in shocks.items()],
         })
-        st.markdown("**Most plausible joint shock** (bounded)")
+        st.markdown("**Most plausible joint shock** (bounded, crisis-regime)")
         st.dataframe(sdf, use_container_width=True, hide_index=True)
     with cc2:
         st.metric("Plausibility", f"{rev['mahalanobis_distance']:.2f}σ",
-                  help="Mahalanobis distance; lower = more plausible & more concerning.")
+                  help="Mahalanobis distance in the crisis regime; lower = more plausible.")
         st.metric("Bounded solve", "yes" if rev["constrained"] else "fell back")
 
     st.markdown("**Top single-factor paths to the same loss** (ranked by plausibility)")
-    alts = rev["alternatives"]
     adf = pd.DataFrame([{
         "Dominant factor": a["dominant_factor"],
         "Shock": next((f"{v*1e4:+.0f}bps" if k in ("Rates", "Credit") else f"{v*100:+.1f}%")
                       for k, v in a["shocks"].items() if abs(v) > 1e-9),
         "Plausibility (σ)": f"{a['mahalanobis_distance']:.2f}",
-    } for a in alts])
+    } for a in rev["alternatives"]])
     st.dataframe(adf, use_container_width=True, hide_index=True)
 
 # ================================================================ BACKTEST
 with tab_backtest:
-    st.subheader("📊 Backtest: model prediction vs. realized crisis returns")
-    st.caption("Predicted = the factor-shock model. Realized = documented 2008/2020 returns, "
-               "independent of the model. This is a genuine out-of-sample check.")
+    st.subheader("📊 Backtest: out-of-sample skill vs. naive benchmarks")
     try:
         bt = api_get("/api/backtest")
     except Exception as exc:
         st.error(str(exc)); st.stop()
 
-    b1, b2 = st.columns(2)
-    b1.metric("Overall MAE (per asset)", pct(bt["overall_mae"]))
-    b2.metric("Overall RMSE (per asset)", pct(bt["overall_rmse"]))
+    oos = bt["out_of_sample"]
+    st.caption(oos["note"])
+    b1, b2, b3 = st.columns(3)
+    b1.metric("OOS model RMSE (per asset)", pct(oos["overall_rmse_model"]))
+    b2.metric("Skill vs. predict-zero", f"{oos['overall_skill_vs_zero']*100:+.0f}%",
+              help="1 − model_RMSE / benchmark_RMSE. Positive = beats the benchmark.")
+    b3.metric("Skill vs. repeat-last-crisis", f"{oos['overall_skill_vs_repeat']*100:+.0f}%")
 
-    for scenario_id_bt, r in bt["scenarios"].items():
-        st.markdown(f"**{r['scenario_name']}** — MAE {pct(r['mae'])}, RMSE {pct(r['rmse'])}")
+    for sid, r in oos["scenarios"].items():
+        st.markdown(f"**Predict {r['scenario_name']}** (trained on {', '.join(r['trained_on'])}) — "
+                    f"skill vs zero {r['skill_vs_zero']*100:+.0f}%, vs repeat {r['skill_vs_repeat']*100:+.0f}%")
         pa = pd.DataFrame(r["per_asset"])
         if not pa.empty:
-            pa_disp = pd.DataFrame({
+            disp = pd.DataFrame({
                 "Ticker": pa["ticker"],
-                "Predicted": (pa["predicted"] * 100).map("{:.1f}%".format),
+                "Model": (pa["model"] * 100).map("{:.1f}%".format),
+                "Repeat-last": (pa["repeat_last"] * 100).map("{:.1f}%".format),
                 "Realized": (pa["realized"] * 100).map("{:.1f}%".format),
-                "Error": (pa["error"] * 100).map("{:+.1f}%".format),
+                "Model error": (pa["error"] * 100).map("{:+.1f}%".format),
             })
             fig = go.Figure()
-            fig.add_bar(name="Predicted", x=pa["ticker"], y=pa["predicted"] * 100)
+            fig.add_bar(name="Model", x=pa["ticker"], y=pa["model"] * 100)
             fig.add_bar(name="Realized", x=pa["ticker"], y=pa["realized"] * 100)
-            fig.update_layout(barmode="group", height=300,
-                              yaxis_title="Crisis-window return %")
             cA, cB = st.columns([1, 1])
-            cA.dataframe(pa_disp, use_container_width=True, hide_index=True)
+            cA.dataframe(disp, use_container_width=True, hide_index=True)
+            fig.update_layout(barmode="group", height=300, yaxis_title="Crisis-window return %")
             cB.plotly_chart(fig, use_container_width=True)
 
-# ================================================================ MODEL
+    with st.expander("In-sample calibration check (not a skill test)"):
+        st.caption(bt["in_sample"]["note"])
+        for sid, r in bt["in_sample"]["scenarios"].items():
+            st.write(f"**{r['scenario_name']}** — MAE {pct(r['mae'])}, RMSE {pct(r['rmse'])}")
+
+# ================================================================ MODEL & DIAGNOSTICS
 with tab_model:
     st.subheader("Factor exposures (the model's assumptions)")
     st.dataframe(pd.DataFrame(assets), use_container_width=True, hide_index=True)
 
-    st.subheader("Portfolio factor regression (OLS with t-stats)")
+    st.subheader("Portfolio factor regression (OLS with t-stats & multicollinearity diagnostics)")
     try:
         reg = api_post("/api/portfolio/factor-regression", {"weights": weights})
         rows = [{"Factor": f, "Beta": f"{reg['betas'][f]:.3f}",
                  "t-stat": f"{reg['t_stats'][f]:.2f}",
-                 "Std err": f"{reg['std_errors'][f]:.3f}"} for f in reg["betas"]]
+                 "Std err": f"{reg['std_errors'][f]:.3f}",
+                 "VIF": f"{reg['vif'][f]:.1f}"} for f in reg["betas"]]
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-        st.caption(f"R² = {reg['r_squared']:.3f} (adjusted {reg['adj_r_squared']:.3f}). "
-                   f"A realistic factor model explains well below 100% of variance — a near-1.0 "
-                   f"R² would signal circular/planted data.")
+        st.caption(f"R² = {reg['r_squared']:.3f} (adj {reg['adj_r_squared']:.3f}). "
+                   f"Condition number = {reg['condition_number']:.1f}. "
+                   f"VIF > ~5-10 flags multicollinearity (correlated factors that cannot be "
+                   f"cleanly separated) — disclosed rather than hidden. A realistic R² well "
+                   f"below 1.0 indicates the data is not a noiseless function of the factors.")
     except RuntimeError as exc:
         st.error(str(exc))
 
-    rg = meta["regime"]
-    st.subheader("Regime statistics")
-    st.write(f"Detected **{rg['n_crisis_weeks']} crisis weeks** out of {rg['n_weeks']} "
-             f"({rg['crisis_fraction']*100:.0f}%); average volatility is "
-             f"**{rg['vol_amplification']:.1f}×** higher in the crisis regime than in calm periods.")
+    st.subheader("Risk contribution with bootstrap confidence intervals")
+    try:
+        rr = api_post("/api/portfolio/risk-contribution", {"weights": weights})
+        ci = rr["pctr_confidence_interval"]
+        cidf = pd.DataFrame({
+            "Ticker": tickers,
+            "Capital %": [f"{weights[t]*100:.1f}%" for t in tickers],
+            "Risk % (point)": [f"{ci[t]['point']*100:.1f}%" for t in tickers],
+            f"{int(rr['pctr_ci_confidence']*100)}% CI": [
+                f"[{ci[t]['lower']*100:.1f}%, {ci[t]['upper']*100:.1f}%]" for t in tickers],
+        })
+        st.dataframe(cidf, use_container_width=True, hide_index=True)
+        st.caption("Block-bootstrap intervals: MCTR is a noisy estimate, so point values are "
+                   "shown with uncertainty rather than as false precision.")
+        if rr.get("crisis_cov_used_fallback"):
+            st.warning("Too few crisis weeks to estimate a distinct crisis covariance — "
+                       "crisis attribution fell back to the full-sample estimate.")
+    except RuntimeError as exc:
+        st.error(str(exc))
+
+    st.subheader("Regime detection")
+    st.write(f"Detected **{rg['n_crisis_weeks']} crisis weeks** of {rg['n_weeks']} "
+             f"({rg['crisis_fraction']*100:.1f}%) via a {rg['detection']}. Under pure normality "
+             f"only ~{rg['expected_fraction_if_normal']*100:.0f}% would be flagged, so this "
+             f"reflects a genuine regime, not a fixed quantile. Crisis-week volatility is "
+             f"**{rg['vol_amplification']:.1f}×** the calm level.")
 
 st.divider()
 st.caption("Educational demonstration — not investment advice. See docs/METHODOLOGY.md for all "

@@ -50,17 +50,19 @@ def stress_commentary(*, scenario_name: str, portfolio_drawdown: float,
             f"so a normal-distribution model understates the downside here."
         )
 
+    method = getattr(rebalance, "reason", None) or getattr(rebalance, "method", "optimization")
     if rebalance.applied:
         parts.append(
-            f"Recommended mitigation: {rebalance.reason} Projected to cut the scenario drawdown by "
-            f"{_pct(rebalance.drawdown_improvement)} (from {_pct(rebalance.old_drawdown)} to "
-            f"{_pct(rebalance.new_drawdown)}) and change crisis-regime volatility by "
-            f"{_pct(rebalance.volatility_change)}."
+            f"Recommended mitigation ({method}): projected to change crisis-regime volatility by "
+            f"{_pct(rebalance.volatility_change)} while keeping the scenario drawdown no worse "
+            f"({_pct(rebalance.new_drawdown)} vs {_pct(rebalance.old_drawdown)}), at "
+            f"{_pct(getattr(rebalance, 'turnover', 0.0))} turnover."
         )
     else:
         parts.append(
-            "No single-trade rebalance materially improves this scenario; the current "
-            "allocation is already reasonably resilient to this shock."
+            "The constrained optimizer finds no turnover-limited trade that reduces crisis "
+            "risk without worsening the scenario; the current allocation is already efficient "
+            "for this shock."
         )
     return " ".join(parts)
 

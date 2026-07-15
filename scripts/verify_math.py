@@ -260,6 +260,56 @@ def verify_single_factor_reverse():
     check("each single-factor path hits -L", ok, f"g={[round(x,4) for x in g]}")
 
 
+def verify_implied_shocks():
+    print("10. Out-of-sample implied shocks  s = (BᵀB)⁻¹Bᵀr")
+    # Overdetermined: 3 assets, 2 factors. If r = B s_true exactly, LS recovers s_true.
+    B = [[1.0, 0.0], [0.0, -7.5], [0.5, -4.0]]
+    s_true = [-0.30, -0.012]
+    r = mat_vec(B, s_true)
+    Bt = transpose(B)
+    s = solve(mat_mat(Bt, B), mat_vec(Bt, r))
+    check("implied shocks recover s_true", approx(s[0], s_true[0], 1e-9) and approx(s[1], s_true[1], 1e-9),
+          f"{[round(x,4) for x in s]}")
+
+
+def verify_vif():
+    print("11. VIF = diagonal of inverse correlation matrix")
+    r = 0.6
+    C = [[1.0, r], [r, 1.0]]
+    inv = inverse(C)
+    # For 2 variables, VIF = 1/(1-r^2).
+    check("VIF matches 1/(1-r^2)", approx(inv[0][0], 1.0 / (1 - r * r), 1e-9),
+          f"{inv[0][0]:.4f} vs {1/(1-r*r):.4f}")
+
+
+def verify_markov_stationary():
+    print("12. Markov regime stationary fraction")
+    b, pi = 0.80, 0.12
+    one_minus_a = pi * (1 - b) / (1 - pi)
+    a = 1 - one_minus_a
+    stationary = (1 - a) / ((1 - a) + (1 - b))
+    check("stationary crisis prob == target", approx(stationary, pi, 1e-12), f"{stationary:.4f}")
+    check("persistence < 1 and > target", b < 1.0 and b > pi)
+
+
+def verify_constant_corr_target():
+    print("13. Constant-correlation shrinkage target structure")
+    X = [[0.02, -0.01, 0.03], [-0.01, 0.02, -0.02], [0.03, 0.01, 0.01], [-0.02, -0.03, 0.02]]
+    T, n = len(X), len(X[0])
+    mean = [sum(X[t][j] for t in range(T)) / T for j in range(n)]
+    Xc = [[X[t][j] - mean[j] for j in range(n)] for t in range(T)]
+    S = [[sum(Xc[t][i] * Xc[t][j] for t in range(T)) / T for j in range(n)] for i in range(n)]
+    var = [S[i][i] for i in range(n)]
+    std = [v ** 0.5 for v in var]
+    corr = [[S[i][j] / (std[i] * std[j]) for j in range(n)] for i in range(n)]
+    r_bar = (sum(corr[i][j] for i in range(n) for j in range(n)) - n) / (n * (n - 1))
+    F = [[(var[i] if i == j else r_bar * std[i] * std[j]) for j in range(n)] for i in range(n)]
+    diag_ok = all(approx(F[i][i], var[i], 1e-12) for i in range(n))
+    sym_ok = all(approx(F[i][j], F[j][i], 1e-12) for i in range(n) for j in range(n))
+    check("target diagonal == sample variances", diag_ok)
+    check("target symmetric", sym_ok, f"r_bar={r_bar:.3f}")
+
+
 def main():
     print("=" * 68)
     print("MacroShock — independent formula verification (stdlib only)")
@@ -273,6 +323,10 @@ def main():
     verify_cornish_fisher()
     verify_shrinkage()
     verify_single_factor_reverse()
+    verify_implied_shocks()
+    verify_vif()
+    verify_markov_stationary()
+    verify_constant_corr_target()
     print("-" * 68)
     print(f"RESULT: {PASS} passed, {FAIL} failed")
     print("=" * 68)

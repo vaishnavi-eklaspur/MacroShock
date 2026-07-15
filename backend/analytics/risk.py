@@ -44,6 +44,37 @@ def risk_contributions(weights: np.ndarray, cov: np.ndarray) -> RiskContribution
     return RiskContribution(sigma, marginal, component, percentage)
 
 
+def bootstrap_risk_contributions(returns: np.ndarray, weights: np.ndarray,
+                                 n_boot: int = 400, block: int = 4,
+                                 alpha: float = 0.90, seed: int = 12345) -> dict:
+    """Block-bootstrap confidence intervals for percentage risk contributions (PCTR).
+
+    MCTR/PCTR are point estimates off a noisy covariance; without error bars they can be
+    over-read. We resample overlapping blocks of the return history (preserving short-run
+    autocorrelation), recompute PCTR on each resample, and report the central estimate with
+    a (100*alpha)% percentile interval per holding.
+    """
+    from .portfolio import covariance_matrix, normalize_weights  # local import avoids cycle
+
+    X = np.asarray(returns, dtype=float)
+    T, n = X.shape
+    w = normalize_weights(weights)
+    rng = np.random.default_rng(seed)
+    n_blocks = int(np.ceil(T / block))
+
+    samples = np.zeros((n_boot, n))
+    for b in range(n_boot):
+        starts = rng.integers(0, max(T - block, 1), size=n_blocks)
+        idx = np.concatenate([np.arange(s, min(s + block, T)) for s in starts])[:T]
+        rc = risk_contributions(w, covariance_matrix(X[idx]))
+        samples[b] = rc.percentage
+
+    lo = np.quantile(samples, (1 - alpha) / 2, axis=0)
+    hi = np.quantile(samples, 1 - (1 - alpha) / 2, axis=0)
+    point = risk_contributions(w, covariance_matrix(X)).percentage
+    return {"point": point, "lower": lo, "upper": hi, "confidence": alpha}
+
+
 def conditional_risk_contributions(weights: np.ndarray, calm_cov: np.ndarray,
                                    stressed_cov: np.ndarray) -> dict:
     """Compare risk attribution under the normal-times vs. the crisis-regime covariance.

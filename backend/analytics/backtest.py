@@ -1,43 +1,51 @@
-"""Backtest: model-predicted vs. realized crisis returns.
+"""Backtest: model-predicted vs. realized crisis returns - IN-SAMPLE and OUT-OF-SAMPLE.
 
-This is the honest validation the model needs. The factor-shock engine PREDICTS each
-asset's return under a scenario; we compare that to INDEPENDENT realized crisis returns
-(loaded from documented market history, not generated from the model). Reported per-asset
-and aggregated over a set of test portfolios, with standard error metrics.
+Two distinct tests, honestly separated:
 
-If a "stress engine" cannot approximately reproduce 2008/2020, it is decoration. This
-module lets a reviewer check that it can - and see exactly where it misses.
+  * IN-SAMPLE (calibration check): the hand-calibrated scenario shocks vs. realized returns.
+    This only confirms the calibration is internally consistent - it is NOT evidence of
+    predictive skill, and is labelled as such.
+
+  * OUT-OF-SAMPLE (the real test): leave-one-crisis-out. Factor shocks are *implied* from
+    OTHER crises' realized returns (least-squares inversion through the exposure matrix),
+    then used to predict the held-out crisis, whose realized returns never touch the
+    prediction. Scored against three naive benchmarks with a skill ratio.
+
+If the factor model cannot beat "predict zero" or "assume the next crisis repeats the last",
+it has no skill - and this module will say so.
 """
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
-from .factors import scenario_asset_returns
+from .factors import FACTOR_ORDER, exposure_matrix, scenario_asset_returns
 from .portfolio import normalize_weights
 
 
 def _test_portfolios(tickers: list[str]) -> dict[str, dict[str, float]]:
-    """A small panel of representative allocations to backtest across."""
     n = len(tickers)
-    equal = {t: 1.0 / n for t in tickers}
-    balanced = {"SPY": 0.40, "IEF": 0.20, "LQD": 0.20, "GLD": 0.10, "DBC": 0.10}
-    sixty_forty = {"SPY": 0.60, "IEF": 0.40}
-    all_equity = {"SPY": 1.0}
-    out = {"Equal weight": equal, "Balanced 40/20/20/10/10": balanced,
-           "60/40": sixty_forty, "All equity": all_equity}
-    # keep only known tickers
+    out = {
+        "Equal weight": {t: 1.0 / n for t in tickers},
+        "Balanced 40/20/20/10/10": {"SPY": 0.40, "IEF": 0.20, "LQD": 0.20, "GLD": 0.10, "DBC": 0.10},
+        "60/40": {"SPY": 0.60, "IEF": 0.40},
+        "All equity": {"SPY": 1.0},
+    }
     return {name: {t: w for t, w in wts.items() if t in tickers} for name, wts in out.items()}
 
 
+def _rmse(errors: np.ndarray) -> float:
+    return float(np.sqrt(np.mean(errors ** 2))) if errors.size else 0.0
+
+
+# --------------------------------------------------------------------- in-sample
 def backtest_scenario(assets: pd.DataFrame, tickers: list[str], shocks: dict[str, float],
                       realized: dict[str, float]) -> dict:
-    """Compare predicted vs realized for one scenario, per-asset and per-portfolio."""
-    predicted = scenario_asset_returns(assets, shocks)          # aligned to assets order
+    """IN-SAMPLE consistency: calibrated shocks vs realized (not a skill test)."""
+    predicted = scenario_asset_returns(assets, shocks)
     pred_map = {t: float(p) for t, p in zip(tickers, predicted)}
 
-    per_asset = []
-    errs = []
+    per_asset, errs = [], []
     for t in tickers:
         if t not in realized:
             continue
@@ -53,37 +61,126 @@ def backtest_scenario(assets: pd.DataFrame, tickers: list[str], shocks: dict[str
         if not common:
             continue
         w = normalize_weights(np.array([wts[t] for t in common]))
-        pred_dd = float(w @ np.array([pred_map[t] for t in common]))
-        real_dd = float(w @ np.array([realized[t] for t in common]))
-        portfolios.append({"portfolio": name, "predicted_drawdown": pred_dd,
-                           "realized_drawdown": real_dd, "error": pred_dd - real_dd})
+        portfolios.append({
+            "portfolio": name,
+            "predicted_drawdown": float(w @ np.array([pred_map[t] for t in common])),
+            "realized_drawdown": float(w @ np.array([realized[t] for t in common])),
+        })
+    return {"per_asset": per_asset, "per_portfolio": portfolios,
+            "mae": float(np.mean(np.abs(errs))), "rmse": _rmse(errs)}
 
+
+# --------------------------------------------------------------------- implied shocks
+def implied_shocks_from_realized(assets: pd.DataFrame, tickers: list[str],
+                                 realized: dict[str, float]) -> dict[str, float]:
+    """Least-squares invert realized asset returns into an implied factor-shock vector.
+
+    Solves min_s ||B_sub s − r|| for the assets that have realized data (min-norm solution
+    when under-determined). These implied shocks summarize a crisis in factor space.
+    """
+    common = [t for t in tickers if t in realized]
+    idx = [tickers.index(t) for t in common]
+    B = exposure_matrix(assets)[idx, :]
+    r = np.array([realized[t] for t in common])
+    s, *_ = np.linalg.lstsq(B, r, rcond=None)
+    return {name: float(v) for name, v in zip(FACTOR_ORDER, s)}
+
+
+# --------------------------------------------------------------------- out-of-sample
+def out_of_sample_backtest(assets: pd.DataFrame, tickers: list[str],
+                           realized_all: dict[str, dict[str, float]],
+                           scenario_names: dict[str, str] | None = None) -> dict:
+    """Leave-one-crisis-out prediction with naive benchmarks and a skill ratio."""
+    scenario_names = scenario_names or {}
+    B = exposure_matrix(assets)
+    eq_idx = FACTOR_ORDER.index("Equity")
+    crisis_ids = list(realized_all.keys())
+    results = {}
+    all_model, all_zero, all_repeat = [], [], []
+
+    for test_id in crisis_ids:
+        train_ids = [c for c in crisis_ids if c != test_id]
+        if not train_ids:
+            continue
+        realized_test = realized_all[test_id]
+        common = [t for t in tickers if t in realized_test]
+        idx = [tickers.index(t) for t in common]
+
+        # Train: average implied shocks across the other crises, and the average realized
+        # per-asset return (the "assume it repeats" benchmark).
+        implied_list = [implied_shocks_from_realized(assets, tickers, realized_all[c])
+                        for c in train_ids]
+        s_train = {f: float(np.mean([imp[f] for imp in implied_list])) for f in FACTOR_ORDER}
+        s_vec = np.array([s_train[f] for f in FACTOR_ORDER])
+
+        repeat_pred = {}
+        for t in common:
+            vals = [realized_all[c][t] for c in train_ids if t in realized_all[c]]
+            repeat_pred[t] = float(np.mean(vals)) if vals else 0.0
+
+        rows, e_model, e_zero, e_repeat, e_equity = [], [], [], [], []
+        for t, i in zip(common, idx):
+            real = realized_test[t]
+            model = float(B[i] @ s_vec)                  # full factor model
+            equity_only = float(B[i, eq_idx] * s_vec[eq_idx])
+            rows.append({"ticker": t, "realized": real, "model": model,
+                         "repeat_last": repeat_pred[t], "error": model - real})
+            e_model.append(model - real)
+            e_zero.append(0.0 - real)
+            e_repeat.append(repeat_pred[t] - real)
+            e_equity.append(equity_only - real)
+
+        rmse_model = _rmse(np.array(e_model))
+        rmse_zero = _rmse(np.array(e_zero))
+        rmse_repeat = _rmse(np.array(e_repeat))
+        rmse_equity = _rmse(np.array(e_equity))
+        results[test_id] = {
+            "scenario_name": scenario_names.get(test_id, test_id),
+            "trained_on": [scenario_names.get(c, c) for c in train_ids],
+            "implied_shocks": s_train,
+            "per_asset": rows,
+            "rmse_model": rmse_model,
+            "rmse_benchmark_zero": rmse_zero,
+            "rmse_benchmark_repeat": rmse_repeat,
+            "rmse_benchmark_equity_only": rmse_equity,
+            "skill_vs_zero": 1.0 - rmse_model / rmse_zero if rmse_zero > 0 else 0.0,
+            "skill_vs_repeat": 1.0 - rmse_model / rmse_repeat if rmse_repeat > 0 else 0.0,
+        }
+        all_model.extend(e_model); all_zero.extend(e_zero); all_repeat.extend(e_repeat)
+
+    rmse_model = _rmse(np.array(all_model))
+    rmse_zero = _rmse(np.array(all_zero))
+    rmse_repeat = _rmse(np.array(all_repeat))
     return {
-        "per_asset": per_asset,
-        "per_portfolio": portfolios,
-        "mae": float(np.mean(np.abs(errs))),
-        "rmse": float(np.sqrt(np.mean(errs ** 2))),
+        "scenarios": results,
+        "overall_rmse_model": rmse_model,
+        "overall_skill_vs_zero": 1.0 - rmse_model / rmse_zero if rmse_zero > 0 else 0.0,
+        "overall_skill_vs_repeat": 1.0 - rmse_model / rmse_repeat if rmse_repeat > 0 else 0.0,
+        "note": "Out-of-sample: shocks implied from OTHER crises predict the held-out crisis. "
+                "Skill > 0 means the factor model beats the benchmark. Only 2 crises are "
+                "available, so this is indicative, not conclusive.",
     }
 
 
 def backtest_all(assets: pd.DataFrame, tickers: list[str], scenarios: dict[str, dict],
                  realized_all: dict[str, dict[str, float]]) -> dict:
-    """Run the backtest across every scenario that has realized data."""
-    results = {}
-    all_errs = []
+    """Full report: in-sample calibration check + out-of-sample skill test."""
+    in_sample = {}
     for scenario_id, realized in realized_all.items():
         scenario = scenarios.get(scenario_id)
         if scenario is None:
             continue
         r = backtest_scenario(assets, tickers, scenario["shocks"], realized)
         r["scenario_name"] = scenario["name"]
-        results[scenario_id] = r
-        all_errs.extend([a["error"] for a in r["per_asset"]])
-    all_errs = np.array(all_errs) if all_errs else np.array([0.0])
+        in_sample[scenario_id] = r
+
+    names = {sid: s.get("name", sid) for sid, s in scenarios.items()}
+    oos = out_of_sample_backtest(assets, tickers, realized_all, names)
     return {
-        "scenarios": results,
-        "overall_mae": float(np.mean(np.abs(all_errs))),
-        "overall_rmse": float(np.sqrt(np.mean(all_errs ** 2))),
-        "note": "Predicted = factor-shock model; Realized = documented crisis returns "
-                "(independent of the model).",
+        "in_sample": {
+            "scenarios": in_sample,
+            "note": "IN-SAMPLE calibration check only - confirms internal consistency, "
+                    "NOT predictive skill.",
+        },
+        "out_of_sample": oos,
     }

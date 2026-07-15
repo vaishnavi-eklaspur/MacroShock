@@ -22,16 +22,45 @@ class FactorRegression:
     t_stats: dict[str, float] = field(default_factory=dict)
     std_errors: dict[str, float] = field(default_factory=dict)
     alpha_t_stat: float = 0.0
+    vif: dict[str, float] = field(default_factory=dict)
+    condition_number: float = 0.0
+    ridge_lambda: float = 0.0
+
+
+def variance_inflation_factors(factor_returns: np.ndarray,
+                               factor_names: list[str] | None = None) -> dict[str, float]:
+    """VIF per factor = diagonal of the inverse correlation matrix of the regressors.
+
+    VIF > ~5-10 flags multicollinearity (factors that co-move too much to be separately
+    identified) - exactly the risk of adding correlated Liquidity/Credit/Equity factors.
+    Disclosing VIF is how a serious model handles that, rather than hiding it.
+    """
+    F = np.asarray(factor_returns, dtype=float)
+    names = factor_names or FACTOR_ORDER[: F.shape[1]]
+    corr = np.corrcoef(F, rowvar=False)
+    try:
+        inv = np.linalg.inv(corr)
+        vif = np.diag(inv)
+    except np.linalg.LinAlgError:
+        vif = np.full(F.shape[1], np.inf)
+    return {name: float(v) for name, v in zip(names, vif)}
+
+
+def factor_condition_number(factor_returns: np.ndarray) -> float:
+    """Condition number of the factor correlation matrix (numerical multicollinearity gauge)."""
+    F = np.asarray(factor_returns, dtype=float)
+    return float(np.linalg.cond(np.corrcoef(F, rowvar=False)))
 
 
 def ols_factor_betas(y: np.ndarray, factor_returns: np.ndarray,
-                     factor_names: list[str] | None = None) -> FactorRegression:
-    """Multivariate OLS of a return series y on factor return columns, with diagnostics.
+                     factor_names: list[str] | None = None,
+                     ridge_lambda: float = 0.0) -> FactorRegression:
+    """Multivariate OLS (or ridge) of a return series y on factor returns, with diagnostics.
 
-    beta_hat = (XᵀX)⁻¹ Xᵀy (via stable lstsq). Standard errors from the classical OLS
-    covariance s² (XᵀX)⁻¹, and t-stats = beta / se. R² and adjusted-R² reported so a
-    reviewer can see how much variance the factors actually explain (a realistic model is
-    well below 1.0).
+    beta_hat = (XᵀX + λR)⁻¹ Xᵀy with λ=0 giving plain OLS. Reports standard errors, t-stats,
+    R²/adjusted-R², per-factor VIF and the condition number so multicollinearity among the
+    six factors is visible rather than hidden. Ridge (λ>0) is available to stabilize betas
+    when factors are collinear.
     """
     y = np.asarray(y, dtype=float)
     F = np.asarray(factor_returns, dtype=float)
@@ -40,13 +69,20 @@ def ols_factor_betas(y: np.ndarray, factor_returns: np.ndarray,
     names = factor_names or FACTOR_ORDER[: F.shape[1]]
 
     X = np.column_stack([np.ones(len(y)), F])
-    coef, *_ = np.linalg.lstsq(X, y, rcond=None)
-    resid = y - X @ coef
     n, k = X.shape
+    XtX = X.T @ X
+    R = np.eye(k)
+    R[0, 0] = 0.0                              # do not penalize the intercept
+    A = XtX + ridge_lambda * R
+    A_inv = np.linalg.inv(A)
+    coef = A_inv @ (X.T @ y)
+
+    resid = y - X @ coef
     dof = max(n - k, 1)
     s2 = float(resid @ resid) / dof
-    XtX_inv = np.linalg.inv(X.T @ X)
-    se = np.sqrt(np.maximum(np.diag(s2 * XtX_inv), 0.0))
+    # (ridge) sandwich covariance: s2 * A^-1 XtX A^-1  (reduces to s2 A^-1 when λ=0)
+    cov_beta = s2 * (A_inv @ XtX @ A_inv)
+    se = np.sqrt(np.maximum(np.diag(cov_beta), 0.0))
     t_stat = np.divide(coef, se, out=np.zeros_like(coef), where=se > 0)
 
     ss_res = float(resid @ resid)
@@ -62,6 +98,9 @@ def ols_factor_betas(y: np.ndarray, factor_returns: np.ndarray,
         t_stats={name: float(t) for name, t in zip(names, t_stat[1:])},
         std_errors={name: float(s) for name, s in zip(names, se[1:])},
         alpha_t_stat=float(t_stat[0]),
+        vif=variance_inflation_factors(F, names),
+        condition_number=factor_condition_number(F),
+        ridge_lambda=float(ridge_lambda),
     )
 
 
