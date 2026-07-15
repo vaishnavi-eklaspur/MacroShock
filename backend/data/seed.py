@@ -108,7 +108,6 @@ def _markov_regime(rng: np.random.Generator) -> np.ndarray:
     # solve (1-a) from pi = (1-a)/((1-a)+(1-b))
     one_minus_b = 1.0 - b
     one_minus_a = pi * one_minus_b / (1.0 - pi)
-    a = 1.0 - one_minus_a            # P(calm->calm)
     p_calm_to_crisis = one_minus_a
     p_crisis_to_crisis = b
 
