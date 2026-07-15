@@ -11,7 +11,7 @@ from __future__ import annotations
 
 # Bumped whenever the model or reference data changes; used to version the cache so a
 # model change can never serve stale (now-wrong) cached numbers.
-MODEL_VERSION = "2.0.0"
+MODEL_VERSION = "3.0.0"
 
 # --- Macro factors -----------------------------------------------------------------
 # unit:

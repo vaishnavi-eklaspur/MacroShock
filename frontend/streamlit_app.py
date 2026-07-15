@@ -130,8 +130,8 @@ with tab_stress:
 
     st.subheader("Tail check: VaR under different distributional assumptions")
     var = riskd["var"]
-    jb = riskd["normality_test"]
-    dof = riskd["fitted_student_t_dof"]
+    jb = riskd.get("normality_test", {"p_value": float("nan"), "normal_rejected": False})
+    dof = riskd.get("fitted_student_t_dof", 5.0)
     vardf = pd.DataFrame({
         "Method": ["Gaussian", f"Student-t (fitted ν={dof:.1f})", "Cornish-Fisher", "Historical"],
         f"1-week VaR ({confidence:.0%})": [var["gaussian"] * 100, var["student_t"] * 100,
@@ -141,8 +141,8 @@ with tab_stress:
     figv.update_layout(showlegend=False, height=320)
     st.plotly_chart(figv, use_container_width=True)
     m = riskd["moments"]
-    normal_txt = "REJECTS normality" if jb["normal_rejected"] else "cannot reject normality"
-    cf_txt = "" if riskd["cornish_fisher_valid"] else " (Cornish-Fisher outside its validity domain — rely on historical)"
+    normal_txt = "REJECTS normality" if jb.get("normal_rejected") else "cannot reject normality"
+    cf_txt = "" if riskd.get("cornish_fisher_valid", True) else " (Cornish-Fisher outside its validity domain — rely on historical)"
     st.caption(f"Skew {m['skew']:.2f}, excess kurtosis {m['excess_kurtosis']:.2f}. "
                f"Jarque-Bera p={jb['p_value']:.3g} → {normal_txt}. Fitted Student-t ν={dof:.1f}."
                f"{cf_txt}")
@@ -163,8 +163,8 @@ with tab_stress:
         r1, r2, r3 = st.columns(3)
         r1.metric("Crisis volatility", pct(reb["new_volatility"]), f"{reb['volatility_change']*100:+.2f}%")
         r2.metric("Scenario drawdown", pct(reb["new_drawdown"]), f"{reb['drawdown_improvement']*100:+.2f}%")
-        r3.metric("Turnover", pct(reb["turnover"]))
-        st.caption(reb["method"])
+        r3.metric("Turnover", pct(reb.get("turnover", 0.0)))
+        st.caption(reb.get("method", "constrained optimization"))
         wd = pd.DataFrame({
             "Ticker": tickers,
             "Current": [f"{reb['old_weights'][t]*100:.1f}%" for t in tickers],
