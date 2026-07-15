@@ -9,9 +9,10 @@ from __future__ import annotations
 import numpy as np
 
 from data import database
-from data.reference import MODEL_VERSION
+from data.reference import BENCHMARKS, MODEL_VERSION
 
 from . import backtest as backtest_mod
+from . import benchmark as benchmark_mod
 from . import commentary, factors, portfolio, rebalance, regime, reverse, risk
 
 
@@ -45,7 +46,13 @@ class MacroShockEngine:
 
         # Full-sample factor covariance (reference) and exposure matrix.
         self.factor_cov = factors.factor_weekly_covariance(self.factor_returns)
-        self.exposure = factors.exposure_matrix(self.assets)
+        self.exposure = factors.exposure_matrix(self.assets)          # structural (hand-set)
+
+        # Data-driven exposures: OLS betas estimated on the weekly history. Because they are
+        # fit on normal-times returns and the crisis realized returns are independent, using
+        # these in the backtest makes it genuinely out-of-sample (no beta leakage).
+        self.exposure_estimated, self.exposure_r2 = factors.estimate_exposures(
+            self.asset_returns, self.factor_returns)
 
         self.scenarios = {s["scenario_id"]: s for s in database.get_scenarios(self.db_path)}
         self.realized = database.get_realized_crisis_returns(self.db_path)
@@ -71,6 +78,28 @@ class MacroShockEngine:
             "crisis_cov_used_fallback": bool(self.stressed_fallback),
             "factors": self.factor_names,
             "dataset": self.dataset_meta,
+            "estimated_exposure_r2_mean": float(np.mean(self.exposure_r2)),
+        }
+
+    def exposure_report(self) -> dict:
+        """Structural (hand-set) vs. estimated (OLS) factor betas per asset, with per-asset R²."""
+        struct, est = self.exposure, self.exposure_estimated
+        return {
+            "factors": self.factor_names,
+            "assets": [
+                {
+                    "ticker": t,
+                    "structural": dict(zip(self.factor_names, struct[i].tolist())),
+                    "estimated": dict(zip(self.factor_names, est[i].tolist())),
+                    "r_squared": float(self.exposure_r2[i]),
+                }
+                for i, t in enumerate(self.tickers)
+            ],
+            "r2_mean": float(np.mean(self.exposure_r2)),
+            "note": "Estimated betas are OLS fits on the weekly return history against "
+                    "independent factor series; R² well below 1.0 confirms the factors are not "
+                    "a rotation of the assets. Scenario pricing uses the interpretable "
+                    "structural matrix; the backtest uses the estimated one (no leakage).",
         }
 
     # ------------------------------------------------------------------ analytics
@@ -232,8 +261,32 @@ class MacroShockEngine:
             "commentary": narrative,
         }
 
+    def active_risk(self, weights: dict[str, float],
+                    benchmark: dict[str, float] | str) -> dict:
+        """Benchmark-relative analytics (tracking error, active risk, factor tilts)."""
+        if isinstance(benchmark, str):
+            if benchmark not in BENCHMARKS:
+                raise KeyError(f"Unknown benchmark '{benchmark}'. Valid: {list(BENCHMARKS)}")
+            bench_dict, bench_name = BENCHMARKS[benchmark], benchmark
+        else:
+            bench_dict, bench_name = benchmark, "custom"
+        w = self.weight_vector(weights)
+        wb = self.weight_vector(bench_dict)
+        rep = benchmark_mod.active_analysis(w, wb, self.cov, self.stressed_cov, self.exposure,
+                                            self.factor_names, self.tickers)
+        rep["benchmark_name"] = bench_name
+        rep["benchmark_weights"] = {t: float(x) for t, x in zip(self.tickers, wb)}
+        return rep
+
+    @staticmethod
+    def benchmarks() -> dict[str, dict[str, float]]:
+        return BENCHMARKS
+
     def backtest(self) -> dict:
-        return backtest_mod.backtest_all(self.assets, self.tickers, self.scenarios, self.realized)
+        # Pass the ESTIMATED exposures (fit on weekly history) so the out-of-sample crisis
+        # prediction never uses betas calibrated to the crises it is scored against.
+        return backtest_mod.backtest_all(self.assets, self.tickers, self.scenarios,
+                                         self.realized, exposure=self.exposure_estimated)
 
 
 def _optimized_rebalance_dict(rec) -> dict:

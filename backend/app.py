@@ -14,6 +14,7 @@ POST /api/portfolio/risk-contribution    calm vs. crisis-regime MCTR decompositi
 POST /api/portfolio/factor-regression    OLS factor betas with t-stats and R^2
 POST /api/portfolio/stress-test          drawdown + attribution + tail VaR + rebalance + commentary
 POST /api/portfolio/custom-stress-test   same, against a user-defined factor-shock vector
+POST /api/portfolio/active-risk          benchmark-relative: tracking error, active risk, tilts
 POST /api/portfolio/reverse-stress-test  constrained most-plausible shock + top-k narratives
 POST /api/portfolio/rebalance            mitigation trade only
 GET  /api/backtest                       model-predicted vs realized crisis returns
@@ -41,6 +42,7 @@ from analytics import rebalance as rebalance_mod
 from analytics.engine import MacroShockEngine, _optimized_rebalance_dict
 from cache import Cache
 from schemas import (
+    ActiveRiskRequest,
     CustomStressRequest,
     RebalanceRequest,
     ReverseRequest,
@@ -113,6 +115,10 @@ def create_app() -> Flask:
     def scenarios():
         return jsonify({"scenarios": engine.list_scenarios()})
 
+    @app.get("/api/exposures")
+    def exposures():
+        return jsonify(engine.exposure_report())
+
     @app.get("/api/backtest")
     def backtest():
         result, hit = cache.get_or_compute("backtest", {"v": engine.model_version},
@@ -162,6 +168,25 @@ def create_app() -> Flask:
         )
         result["cache_hit"] = hit
         result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+        return jsonify(result)
+
+    @app.get("/api/benchmarks")
+    def benchmarks():
+        return jsonify({"benchmarks": engine.benchmarks()})
+
+    @app.post("/api/portfolio/active-risk")
+    def active_risk():
+        req = ActiveRiskRequest(**(request.get_json(force=True) or {}))
+        check_tickers(req.weights)
+        if req.benchmark_weights:
+            check_tickers(req.benchmark_weights)
+            bench = req.benchmark_weights
+        else:
+            bench = req.benchmark_id or "US 60/40"
+        result, hit = cache.get_or_compute(
+            "active", {"weights": req.weights, "bench": bench},
+            lambda: engine.active_risk(req.weights, bench))
+        result["cache_hit"] = hit
         return jsonify(result)
 
     @app.post("/api/portfolio/custom-stress-test")

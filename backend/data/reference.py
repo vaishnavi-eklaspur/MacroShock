@@ -224,6 +224,14 @@ REALIZED_CRISIS_RETURNS: dict[str, dict[str, float]] = {
     },
 }
 
+# Strategic benchmarks for benchmark-relative (active-risk) analysis. IPS builds model
+# portfolios relative to a strategic asset allocation like these.
+BENCHMARKS: dict[str, dict[str, float]] = {
+    "US 60/40": {"SPY": 0.60, "IEF": 0.40},
+    "Global 60/40": {"SPY": 0.36, "EFA": 0.18, "EEM": 0.06, "IEF": 0.28, "LQD": 0.12},
+    "All-weather": {"SPY": 0.30, "TLT": 0.40, "IEF": 0.15, "GLD": 0.075, "DBC": 0.075},
+}
+
 # Default illustrative portfolio (weights sum to 1.0) - a diversified multi-asset sleeve.
 DEFAULT_WEIGHTS: dict[str, float] = {
     "SPY": 0.20, "QQQ": 0.08, "IWM": 0.04, "EFA": 0.08, "EEM": 0.05,

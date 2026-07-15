@@ -170,45 +170,64 @@ def _derive_factor_returns(asset_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(F, columns=FACTOR_ORDER, index=asset_df.index)
 
 
-def build_returns(source: str, csv_path: str | None, start: str,
-                  end: str | None) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+def build_returns(source: str, csv_path: str | None, start: str, end: str | None,
+                  factors_csv: str | None = None) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Return (asset_returns, factor_returns, provenance). Falls back to synthetic on failure.
 
     source: 'synthetic' (default, reproducible), 'csv' (a weekly-returns file), or 'yahoo'
-    (live download via yfinance). Real sources derive factor returns by projection.
+    (live download via yfinance). Real sources use INDEPENDENT factor series (Yahoo proxies or
+    a --factors-csv) so estimated betas/R² are honest; only if none is available do we fall
+    back to a projection of the assets (labelled 'derived-by-projection', which is circular).
     """
     if source == "synthetic":
         adf, fdf, _ = _generate_returns()
-        return adf, fdf, {"source": "synthetic", "as_of_start": adf.index[0],
-                          "as_of_end": adf.index[-1], "n_weeks": str(len(adf))}
+        return adf, fdf, {"source": "synthetic", "factors": "independent (latent)",
+                          "as_of_start": adf.index[0], "as_of_end": adf.index[-1],
+                          "n_weeks": str(len(adf))}
     try:
-        from .providers import CsvReturnsProvider, YFinanceReturnsProvider
+        from .providers import (
+            CsvReturnsProvider,
+            YFinanceReturnsProvider,
+            download_factor_proxies,
+        )
+        fdf = None
         if source == "csv":
             if not csv_path:
                 raise ValueError("source=csv requires --csv PATH")
             adf = CsvReturnsProvider(csv_path).get_asset_returns()
+            if factors_csv:
+                fdf = CsvReturnsProvider(factors_csv).get_asset_returns()[FACTOR_ORDER]
         elif source == "yahoo":
             tickers = [a["ticker"] for a in ASSETS]
             adf = YFinanceReturnsProvider(tickers, start=start, end=end).get_asset_returns()
+            fdf = download_factor_proxies(start, end)
         else:
             raise ValueError(f"Unknown source '{source}'")
+
         adf = adf.dropna(how="any")
+        if fdf is not None:                       # independent factors: align on common dates
+            idx = adf.index.intersection(fdf.index)
+            adf, fdf = adf.loc[idx], fdf.loc[idx]
+            factor_note = "independent"
+        else:                                     # last resort: circular projection
+            fdf = _derive_factor_returns(adf)
+            factor_note = "derived-by-projection (approximate; pass --factors-csv for a true model)"
         if adf.shape[0] < 60:
             raise ValueError(f"Only {adf.shape[0]} usable weeks from {source}; need >= 60.")
-        fdf = _derive_factor_returns(adf)
-        return adf, fdf, {"source": source, "as_of_start": str(adf.index[0]),
-                          "as_of_end": str(adf.index[-1]), "n_weeks": str(len(adf))}
+        return adf, fdf, {"source": source, "factors": factor_note,
+                          "as_of_start": str(adf.index[0]), "as_of_end": str(adf.index[-1]),
+                          "n_weeks": str(len(adf))}
     except Exception as exc:  # network down, bad CSV, missing yfinance -> reproducible fallback
         print(f"[seed] real source '{source}' failed ({exc}); falling back to synthetic.")
         adf, fdf, _ = _generate_returns()
         return adf, fdf, {"source": f"synthetic (fallback from {source})",
-                          "as_of_start": adf.index[0], "as_of_end": adf.index[-1],
-                          "n_weeks": str(len(adf))}
+                          "factors": "independent (latent)", "as_of_start": adf.index[0],
+                          "as_of_end": adf.index[-1], "n_weeks": str(len(adf))}
 
 
 def seed(db_path: str | None = None, source: str = "synthetic",
          csv_path: str | None = None, start: str = "2010-01-01",
-         end: str | None = None) -> str:
+         end: str | None = None, factors_csv: str | None = None) -> str:
     conn = snowflake_mock.connect(database=db_path)
     db_file = conn._db_path  # noqa: SLF001
 
@@ -255,7 +274,7 @@ def seed(db_path: str | None = None, source: str = "synthetic",
                 (scenario_id, ticker, ret),
             )
 
-    adf, fdf, provenance = build_returns(source, csv_path, start, end)
+    adf, fdf, provenance = build_returns(source, csv_path, start, end, factors_csv)
     for date, row in adf.iterrows():
         for ticker, ret in row.items():
             cur.execute("INSERT INTO asset_returns (ticker, obs_date, weekly_return) VALUES (?,?,?)",
@@ -280,12 +299,15 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Seed the MacroShock database.")
     ap.add_argument("--source", choices=["synthetic", "csv", "yahoo"], default="synthetic",
                     help="Return-history source (default: synthetic, reproducible).")
-    ap.add_argument("--csv", dest="csv_path", default=None, help="Path to a weekly-returns CSV.")
+    ap.add_argument("--csv", dest="csv_path", default=None, help="Path to a weekly asset-returns CSV.")
+    ap.add_argument("--factors-csv", dest="factors_csv", default=None,
+                    help="Optional independent factor-returns CSV (else factors are projected).")
     ap.add_argument("--start", default="2010-01-01", help="Start date for --source yahoo.")
     ap.add_argument("--end", default=None, help="End date for --source yahoo.")
     args = ap.parse_args()
 
-    path = seed(source=args.source, csv_path=args.csv_path, start=args.start, end=args.end)
+    path = seed(source=args.source, csv_path=args.csv_path, start=args.start, end=args.end,
+                factors_csv=args.factors_csv)
     print(f"Seeded MacroShock database at: {path}")
     print(f"  assets={len(ASSETS)}  factors={len(FACTORS)}  scenarios={len(SCENARIOS)}")
     print(f"  realized-return scenarios={len(REALIZED_CRISIS_RETURNS)}")

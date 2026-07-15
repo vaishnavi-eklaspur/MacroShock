@@ -42,6 +42,21 @@ class RebalanceRequest(WeightsRequest):
     scenario_id: str = Field(..., min_length=1)
 
 
+class ActiveRiskRequest(WeightsRequest):
+    """Benchmark-relative request: a named benchmark or an explicit benchmark weight vector."""
+    benchmark_id: str | None = Field(None, description="Named benchmark (e.g. 'US 60/40').")
+    benchmark_weights: dict[str, float] | None = Field(None, description="Explicit {ticker: weight}.")
+
+    @field_validator("benchmark_weights")
+    @classmethod
+    def _validate_bench(cls, v):
+        if v is not None:
+            for t, w in v.items():
+                if not isinstance(w, (int, float)) or not math.isfinite(w) or w < 0:
+                    raise ValueError(f"Benchmark weight for '{t}' must be a finite non-negative number.")
+        return v
+
+
 class CustomStressRequest(WeightsRequest):
     """A user-defined stress scenario: an arbitrary factor-shock vector."""
     shocks: dict[str, float] = Field(..., description="Mapping {factor_name: shock} in native units.")

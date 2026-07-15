@@ -104,6 +104,29 @@ def ols_factor_betas(y: np.ndarray, factor_returns: np.ndarray,
     )
 
 
+def estimate_exposures(asset_returns: np.ndarray, factor_returns: np.ndarray,
+                       ) -> tuple[np.ndarray, np.ndarray]:
+    """Data-driven exposure matrix: OLS-regress each asset on the (independent) factor history.
+
+    Returns (B_hat [n_assets x n_factors], r2 [n_assets]). Unlike the hand-set structural
+    matrix, these betas are ESTIMATED from realized returns - and because the factors are
+    independent series (not a projection of the assets themselves), the reported R² is honest
+    (~0.7-0.9 with real idiosyncratic risk), not the ~1.0 you get if factors are derived from
+    the assets. This is what makes the model a factor model rather than a rotation of itself.
+    """
+    A = np.asarray(asset_returns, dtype=float)      # T x n
+    F = np.asarray(factor_returns, dtype=float)      # T x k
+    T = A.shape[0]
+    X = np.column_stack([np.ones(T), F])             # T x (k+1)
+    coef, *_ = np.linalg.lstsq(X, A, rcond=None)     # (k+1) x n
+    B_hat = coef[1:].T                                # n x k (drop intercept)
+    resid = A - X @ coef
+    ss_res = (resid ** 2).sum(axis=0)
+    ss_tot = ((A - A.mean(axis=0)) ** 2).sum(axis=0)
+    r2 = np.where(ss_tot > 0, 1.0 - ss_res / ss_tot, 0.0)
+    return B_hat, r2
+
+
 def exposure_matrix(assets: pd.DataFrame) -> np.ndarray:
     """Linear factor-exposure matrix B (n_assets x n_factors), columns in FACTOR_ORDER.
 

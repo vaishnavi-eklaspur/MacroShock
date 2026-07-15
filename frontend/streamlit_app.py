@@ -294,8 +294,8 @@ def render_stress(result: dict, weights: dict, confidence: float, key_prefix: st
                        help="Open in a browser and Print → Save as PDF for a shareable report.")
 
 
-tab_stress, tab_custom, tab_compare, tab_reverse, tab_backtest, tab_model = st.tabs(
-    ["Stress test", "Scenario builder", "Compare A/B", "Reverse stress",
+tab_stress, tab_custom, tab_compare, tab_bench, tab_reverse, tab_backtest, tab_model = st.tabs(
+    ["Stress test", "Scenario builder", "Compare A/B", "Benchmark-relative", "Reverse stress",
      "Backtest (out-of-sample)", "Model & diagnostics"])
 
 # ================================================================ STRESS TEST
@@ -380,6 +380,54 @@ with tab_compare:
     dd = (rB["portfolio_drawdown"] - rA["portfolio_drawdown"]) * 100
     st.info(f"Under {scenario_labels[scenario_id]}, **B draws down {abs(dd):.1f}pp "
             f"{'less' if dd > 0 else 'more'}** than A.")
+
+# ================================================================ BENCHMARK-RELATIVE
+with tab_bench:
+    st.subheader("🎯 Benchmark-relative analytics (active risk)")
+    st.caption("How IPS actually works: a model portfolio is measured **against a strategic "
+               "benchmark** — tracking error, active-risk contribution, and factor tilts, not "
+               "just absolute risk.")
+    try:
+        benches = api_get("/api/benchmarks")["benchmarks"]
+    except Exception as exc:
+        st.error(str(exc)); st.stop()
+    bname = st.selectbox("Strategic benchmark", list(benches))
+    try:
+        ar = api_post("/api/portfolio/active-risk", {"weights": weights, "benchmark_id": bname})
+    except RuntimeError as exc:
+        st.error(str(exc)); st.stop()
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Tracking error (calm, ann.)", pct(ar["tracking_error_annual_calm"]))
+    m2.metric("Tracking error (crisis, ann.)", pct(ar["tracking_error_annual_crisis"]),
+              help="Active risk rises in the crisis regime as correlations tighten.")
+    m3.metric("Active share", pct(ar["active_share"]))
+    m4.metric("Port vol vs bench", pct(ar["portfolio_vol_annual"]),
+              f"{(ar['portfolio_vol_annual']-ar['benchmark_vol_annual'])*100:+.2f}pp")
+
+    held = [t for t in tickers if abs(ar["active_weights"][t]) > 1e-9]
+    left, right = st.columns(2)
+    with left:
+        st.markdown("**Active factor tilts** (portfolio − benchmark exposure)")
+        tl = ar["factor_tilts"]
+        tdf = pd.DataFrame({"Factor": list(tl.keys()), "Active exposure": list(tl.values())})
+        figt = px.bar(tdf, x="Factor", y="Active exposure", color="Active exposure",
+                      color_continuous_scale="RdBu")
+        figt.update_layout(showlegend=False, coloraxis_showscale=False, height=340)
+        st.plotly_chart(figt, use_container_width=True)
+    with right:
+        st.markdown("**Active weights vs benchmark**")
+        aw = pd.DataFrame({
+            "Ticker": held,
+            "Portfolio": [f"{weights[t]*100:.1f}%" for t in held],
+            "Benchmark": [f"{ar['benchmark_weights'][t]*100:.1f}%" for t in held],
+            "Active": [f"{ar['active_weights'][t]*100:+.1f}%" for t in held],
+            "Active risk % (crisis)": [f"{ar['active_risk_pctr_crisis'][t]*100:+.1f}%" for t in held],
+        })
+        st.dataframe(aw, use_container_width=True, hide_index=True)
+    st.caption("Active-risk contribution decomposes tracking error across holdings (Euler "
+               "identity, sums to 100%). Factor tilts show where the portfolio is over/under the "
+               "benchmark in macro-factor space — the language of multi-asset portfolio construction.")
 
 # ================================================================ REVERSE STRESS
 with tab_reverse:
@@ -488,6 +536,23 @@ with tab_backtest:
 with tab_model:
     st.subheader("Factor exposures (the model's assumptions)")
     st.dataframe(pd.DataFrame(assets), use_container_width=True, hide_index=True)
+
+    st.subheader("Structural vs. estimated betas (are the factors real?)")
+    try:
+        exp = api_get("/api/exposures")
+        erows = [{"Ticker": a["ticker"],
+                  **{f"{f} (struct→est)": f"{a['structural'][f]:+.2f}→{a['estimated'][f]:+.2f}"
+                     for f in ["Equity", "Rates", "Credit"]},
+                  "R²": f"{a['r_squared']:.2f}"} for a in exp["assets"]]
+        st.dataframe(pd.DataFrame(erows), use_container_width=True, hide_index=True)
+        st.caption(f"Mean R² = **{exp['r2_mean']:.2f}** — deliberately **below 1.0**. The factors "
+                   f"are independent series and betas are OLS-estimated from history, so a real "
+                   f"amount of return is idiosyncratic. If factors were derived from the assets "
+                   f"themselves, R² would be ~1.0 and the 'factor model' would be circular. "
+                   f"Scenario pricing uses the interpretable structural betas; the backtest uses "
+                   f"the estimated ones (fit on weekly data, so no leakage into the crisis test).")
+    except Exception as exc:
+        st.error(str(exc))
 
     st.subheader("Portfolio factor regression (OLS with t-stats & multicollinearity diagnostics)")
     try:
