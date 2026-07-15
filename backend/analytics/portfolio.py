@@ -66,12 +66,6 @@ def historical_var(portfolio_returns: np.ndarray, alpha: float = 0.95) -> float:
     return float(-np.quantile(r, 1.0 - alpha))
 
 
-def cumulative_return(period_returns: np.ndarray) -> float:
-    """Compounded cumulative return over a sequence of periodic returns."""
-    r = np.asarray(period_returns, dtype=float)
-    return float(np.prod(1.0 + r) - 1.0)
-
-
 # --------------------------------------------------------------------- fat-tailed risk
 def historical_cvar(portfolio_returns: np.ndarray, alpha: float = 0.95) -> float:
     """Empirical Expected Shortfall: mean loss in the worst (1-alpha) tail."""
@@ -164,33 +158,6 @@ def cornish_fisher_valid(portfolio_returns: np.ndarray) -> bool:
 
 
 # --------------------------------------------------------------------- robust covariance
-def ledoit_wolf_covariance(returns: np.ndarray) -> tuple[np.ndarray, float]:
-    """Ledoit-Wolf shrinkage of the sample covariance toward a scaled-identity target.
-
-    Returns (Sigma_shrunk, shrinkage_intensity). Shrinkage reduces the estimation error
-    that plagues sample covariance (and therefore MCTR) when T is not >> n. Target is
-    F = m·I with m = average sample variance; optimal intensity per Ledoit & Wolf (2004).
-    """
-    X = np.asarray(returns, dtype=float)
-    T, n = X.shape
-    Xc = X - X.mean(axis=0)
-    S = (Xc.T @ Xc) / T                      # MLE sample covariance
-    m = np.trace(S) / n
-    F = m * np.eye(n)
-    d2 = float(np.sum((S - F) ** 2))         # ||S - F||_F^2
-    # pi: sum over t of ||x_t x_tᵀ - S||_F^2 / T
-    b2_bar = 0.0
-    for t in range(T):
-        xt = Xc[t][:, None]
-        b2_bar += float(np.sum((xt @ xt.T - S) ** 2))
-    b2_bar /= T**2
-    shrink = 0.0 if d2 == 0 else max(0.0, min(1.0, b2_bar / d2))
-    sigma = shrink * F + (1.0 - shrink) * S
-    # rescale from /T (MLE) to /(T-1) (unbiased) for consistency with covariance_matrix
-    sigma *= T / (T - 1)
-    return sigma, float(shrink)
-
-
 def ledoit_wolf_constant_correlation(returns: np.ndarray) -> tuple[np.ndarray, float]:
     """Ledoit-Wolf (2003) shrinkage toward the CONSTANT-CORRELATION target.
 

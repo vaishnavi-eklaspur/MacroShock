@@ -37,17 +37,6 @@ def test_sample_moments_detects_fat_tails(fat_tailed_series):
     assert m["excess_kurtosis"] > 1.0  # clearly leptokurtic
 
 
-def test_ledoit_wolf_is_valid_covariance():
-    rng = np.random.default_rng(3)
-    X = rng.standard_normal((120, 5)) * 0.02
-    cov, shrink = pf.ledoit_wolf_covariance(X)
-    assert cov.shape == (5, 5)
-    assert 0.0 <= shrink <= 1.0
-    assert np.allclose(cov, cov.T)                      # symmetric
-    assert np.all(np.linalg.eigvalsh(cov) > -1e-10)     # PSD
-
-
-
 def test_jarque_bera_rejects_fat_tails(fat_tailed_series):
     jb = pf.jarque_bera(fat_tailed_series)
     assert jb["normal_rejected"] is True

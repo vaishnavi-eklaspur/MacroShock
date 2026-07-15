@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from analytics import regime
 
@@ -39,5 +40,5 @@ def test_conditional_covariance_returns_cov_and_flag():
 def test_regime_summary_reports_expected_false_positive_rate():
     X = _returns_with_crises()
     s = regime.regime_summary(X, p=0.99)
-    assert s["expected_fraction_if_normal"] == 0.01
+    assert s["expected_fraction_if_normal"] == pytest.approx(0.01)
     assert s["vol_amplification"] > 1.0
