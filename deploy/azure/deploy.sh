@@ -40,7 +40,10 @@ az containerapp create -n macroshock-api -g "$RG" --environment "$ENV" \
   --image "$LOGIN/macroshock-api:latest" --registry-server "$LOGIN" \
   --target-port 5000 --ingress external --min-replicas 1 --max-replicas 3 \
   --cpu 0.5 --memory 1.0Gi "${API_SECRET[@]}" \
-  --env-vars "MACROSHOCK_DB=/app/dbdata/macroshock.db" "${API_ENVKEY[@]}" \
+  --env-vars "MACROSHOCK_DB=/app/dbdata/macroshock.db" \
+             "MACROSHOCK_SOURCE=csv" \
+             "MACROSHOCK_CSV=data/real_asset_returns.csv" \
+             "MACROSHOCK_FACTORS_CSV=data/real_factor_returns.csv" "${API_ENVKEY[@]}" \
   -o none
 API_URL="https://$(az containerapp show -n macroshock-api -g "$RG" --query properties.configuration.ingress.fqdn -o tsv)"
 

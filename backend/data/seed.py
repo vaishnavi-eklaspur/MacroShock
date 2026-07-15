@@ -301,9 +301,10 @@ if __name__ == "__main__":
     ap.add_argument("--source", choices=["synthetic", "csv", "yahoo"],
                     default=os.getenv("MACROSHOCK_SOURCE", "synthetic"),
                     help="Return-history source (default: synthetic, reproducible; env MACROSHOCK_SOURCE).")
-    ap.add_argument("--csv", dest="csv_path", default=None, help="Path to a weekly asset-returns CSV.")
-    ap.add_argument("--factors-csv", dest="factors_csv", default=None,
-                    help="Optional independent factor-returns CSV (else factors are projected).")
+    ap.add_argument("--csv", dest="csv_path", default=os.getenv("MACROSHOCK_CSV"),
+                    help="Path to a weekly asset-returns CSV (env MACROSHOCK_CSV).")
+    ap.add_argument("--factors-csv", dest="factors_csv", default=os.getenv("MACROSHOCK_FACTORS_CSV"),
+                    help="Independent factor-returns CSV, else projected (env MACROSHOCK_FACTORS_CSV).")
     ap.add_argument("--start", default=os.getenv("MACROSHOCK_START", "2010-01-01"),
                     help="Start date for --source yahoo (env MACROSHOCK_START).")
     ap.add_argument("--end", default=None, help="End date for --source yahoo.")

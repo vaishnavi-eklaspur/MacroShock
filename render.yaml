@@ -12,8 +12,14 @@ services:
     envVars:
       - key: MACROSHOCK_DB
         value: /app/dbdata/macroshock.db
-      - key: MACROSHOCK_SOURCE      # boot on real Yahoo data; falls back to synthetic offline
-        value: yahoo
+      # Boot on REAL market data baked into the repo (a Yahoo snapshot), because Yahoo blocks
+      # datacenter IPs so a live pull fails from any cloud host. CSV works everywhere.
+      - key: MACROSHOCK_SOURCE
+        value: csv
+      - key: MACROSHOCK_CSV
+        value: data/real_asset_returns.csv
+      - key: MACROSHOCK_FACTORS_CSV
+        value: data/real_factor_returns.csv
       - key: CORS_ORIGINS
         value: "*"
 
