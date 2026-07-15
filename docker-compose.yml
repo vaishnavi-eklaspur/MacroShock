@@ -18,6 +18,9 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       MACROSHOCK_DB: /app/dbdata/macroshock.db
+      # Data source seeded at container start: synthetic (default) | yahoo | csv.
+      MACROSHOCK_SOURCE: ${MACROSHOCK_SOURCE:-synthetic}
+      MACROSHOCK_START: ${MACROSHOCK_START:-2012-01-01}
       # Uncomment to require an API key on write endpoints:
       # MACROSHOCK_API_KEY: ${MACROSHOCK_API_KEY:-}
     ports:

@@ -295,14 +295,17 @@ def seed(db_path: str | None = None, source: str = "synthetic",
 
 if __name__ == "__main__":
     import argparse
+    import os
 
     ap = argparse.ArgumentParser(description="Seed the MacroShock database.")
-    ap.add_argument("--source", choices=["synthetic", "csv", "yahoo"], default="synthetic",
-                    help="Return-history source (default: synthetic, reproducible).")
+    ap.add_argument("--source", choices=["synthetic", "csv", "yahoo"],
+                    default=os.getenv("MACROSHOCK_SOURCE", "synthetic"),
+                    help="Return-history source (default: synthetic, reproducible; env MACROSHOCK_SOURCE).")
     ap.add_argument("--csv", dest="csv_path", default=None, help="Path to a weekly asset-returns CSV.")
     ap.add_argument("--factors-csv", dest="factors_csv", default=None,
                     help="Optional independent factor-returns CSV (else factors are projected).")
-    ap.add_argument("--start", default="2010-01-01", help="Start date for --source yahoo.")
+    ap.add_argument("--start", default=os.getenv("MACROSHOCK_START", "2010-01-01"),
+                    help="Start date for --source yahoo (env MACROSHOCK_START).")
     ap.add_argument("--end", default=None, help="End date for --source yahoo.")
     args = ap.parse_args()
 
