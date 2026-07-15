@@ -68,22 +68,32 @@ def stress_commentary(*, scenario_name: str, portfolio_drawdown: float,
 
 
 def reverse_commentary(*, target_loss: float, shocks: dict[str, float],
-                       mahalanobis_distance: float, constrained: bool,
+                       mahalanobis_distance: float, constrained: bool, reachable: bool,
+                       max_loss_within_bounds: float, plausibility_note: str,
                        top_alternative: dict | None) -> str:
-    """Narrate the reverse-stress result: the most plausible path to a target loss."""
+    """Narrate the reverse-stress result, distinguishing 'plausible' from 'least-implausible'."""
+    if not reachable:
+        return (f"No combination of factor moves within plausible bounds produces a "
+                f"{_pct(target_loss)} loss. The worst plausible loss for this portfolio is "
+                f"about {_pct(max_loss_within_bounds)} — i.e. this target is effectively "
+                f"unreachable, which is a reassuring result, not a forecast.")
+
     ordered = sorted(shocks.items(), key=lambda kv: -abs(kv[1]))
     descriptors = [_fmt_shock(n, v) for n, v in ordered if abs(v) > 1e-6]
     combo = ", ".join(descriptors[:4]) if descriptors else "no material factor move"
 
-    basis = "within plausible per-factor bounds" if constrained else "unconstrained"
+    # "most plausible" only if it is actually plausible; otherwise "least-implausible".
+    qualifier = "most plausible" if mahalanobis_distance <= 3.0 else "least-implausible"
     text = (
-        f"The most plausible path to a {_pct(target_loss)} loss ({basis}) is a joint move of "
-        f"{combo}. This sits roughly {mahalanobis_distance:.1f} standard deviations from normal "
-        f"factor behaviour - a lower number means a more plausible, and more concerning, loss."
+        f"The {qualifier} path to a {_pct(target_loss)} loss is a joint move of {combo}, "
+        f"about {mahalanobis_distance:.1f} standard deviations from normal factor behaviour "
+        f"(lower = more plausible)."
     )
+    if plausibility_note:
+        text += " " + plausibility_note
     if top_alternative:
         alt = top_alternative
         alt_desc = ", ".join(_fmt_shock(n, v) for n, v in alt["shocks"].items() if abs(v) > 1e-6)
-        text += (f" Alternatively, the loss could arrive almost entirely through "
+        text += (f" Alternatively, the loss could arrive largely through "
                  f"{alt['dominant_factor']} ({alt_desc}).")
     return text

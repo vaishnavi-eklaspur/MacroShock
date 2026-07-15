@@ -1,0 +1,7 @@
+[client]
+# Hide the Streamlit "Deploy" button and developer chrome — this is an analytical tool,
+# not a deploy target, and the button sends the wrong signal next to risk numbers.
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false

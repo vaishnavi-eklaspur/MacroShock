@@ -97,9 +97,9 @@ with tab_stress:
     c2.metric(f"Historical VaR ({confidence:.0%}, 1wk)", pct(riskd["var"]["historical"]))
     c3.metric(f"Gaussian VaR ({confidence:.0%}, 1wk)", pct(riskd["var"]["gaussian"]))
     c4.metric("Annualized vol", pct(riskd["volatility_annual"]))
-    tag = "cache hit ⚡" if result.get("cache_hit") else "computed"
+    tag = "cache hit" if result.get("cache_hit") else "computed"
     st.caption(f"**{scenario['name']}** — {scenario['description']}  ·  {tag} in "
-               f"{result.get('latency_ms', 0)} ms")
+               f"~{round(result.get('latency_ms', 0))} ms")
 
     st.subheader("🧭 Investment commentary")
     st.info(result["commentary"])
@@ -140,12 +140,26 @@ with tab_stress:
     figv = px.bar(vardf, x="Method", y=f"1-week VaR ({confidence:.0%})", color="Method")
     figv.update_layout(showlegend=False, height=320)
     st.plotly_chart(figv, use_container_width=True)
+
+    cvar = riskd.get("cvar", {})
+    cv1, cv2 = st.columns(2)
+    cv1.metric(f"Gaussian CVaR / ES ({confidence:.0%})", pct(cvar.get("gaussian", float("nan"))),
+               help="Expected loss conditional on breaching VaR (tail-conditional).")
+    cv2.metric(f"Historical CVaR / ES ({confidence:.0%})", pct(cvar.get("historical", float("nan"))))
+
     m = riskd["moments"]
     normal_txt = "REJECTS normality" if jb.get("normal_rejected") else "cannot reject normality"
-    cf_txt = "" if riskd.get("cornish_fisher_valid", True) else " (Cornish-Fisher outside its validity domain — rely on historical)"
-    st.caption(f"Skew {m['skew']:.2f}, excess kurtosis {m['excess_kurtosis']:.2f}. "
-               f"Jarque-Bera p={jb['p_value']:.3g} → {normal_txt}. Fitted Student-t ν={dof:.1f}."
-               f"{cf_txt}")
+    labels = {"gaussian": "Gaussian", "student_t": "Student-t", "cornish_fisher": "Cornish-Fisher",
+              "historical": "Historical"}
+    fattest = labels.get(max(var, key=var.get), "one")
+    cf_txt = "" if riskd.get("cornish_fisher_valid", True) else \
+        " Cornish-Fisher is outside its validity domain here — defer to the historical figure."
+    st.caption(f"Skew {m['skew']:.2f}, excess kurtosis {m['excess_kurtosis']:.2f}; Jarque-Bera "
+               f"p={jb['p_value']:.3g} → {normal_txt} (fitted Student-t ν={dof:.1f}). The largest "
+               f"1-week VaR is the **{fattest}** estimate. Note: positive skew can pull the "
+               f"Cornish-Fisher left tail *below* Gaussian even when kurtosis is high, so the "
+               f"methods need not be monotone; the historical and CVaR figures anchor the realized "
+               f"tail.{cf_txt}")
 
     st.subheader("Per-holding scenario impact")
     pas, pnl = result["per_asset_scenario_return"], result["per_asset_pnl_contribution"]
@@ -181,37 +195,48 @@ with tab_reverse:
     st.caption("What would make me lose X? We solve for the most *plausible* factor shock "
                "(bounded, measured against the **crisis-regime** covariance) and rank the top "
                "single-factor paths.")
-    target = st.slider("Target portfolio loss", 0.05, 0.50, 0.20, 0.01, format="%.0f%%")
+    target_pct = st.slider("Target portfolio loss (%)", 5, 50, 20, 1, format="%d%%")
+    target = target_pct / 100.0
     try:
         rev = api_post("/api/portfolio/reverse-stress-test",
                        {"weights": weights, "target_loss": target})
     except RuntimeError as exc:
         st.error(str(exc)); st.stop()
 
+    if not rev.get("reachable", True):
+        st.warning(rev.get("plausibility_note", "Target loss is not reachable within plausible bounds."))
     st.info(rev["commentary"])
     cc1, cc2 = st.columns([2, 1])
     with cc1:
         shocks = rev["shocks"]
+        label = "worst plausible shock (target unreachable)" if not rev.get("reachable", True) \
+            else "most plausible joint shock" if rev["mahalanobis_distance"] <= 3.0 \
+            else "least-implausible joint shock"
         sdf = pd.DataFrame({
             "Factor": list(shocks.keys()),
             "Implied shock": [f"{v*1e4:+.0f}bps" if k in ("Rates", "Credit") else f"{v*100:+.1f}%"
                               for k, v in shocks.items()],
         })
-        st.markdown("**Most plausible joint shock** (bounded, crisis-regime)")
+        st.markdown(f"**{label.capitalize()}** (bounded, crisis-regime)")
         st.dataframe(sdf, use_container_width=True, hide_index=True)
     with cc2:
-        st.metric("Plausibility", f"{rev['mahalanobis_distance']:.2f}σ",
-                  help="Mahalanobis distance in the crisis regime; lower = more plausible.")
-        st.metric("Bounded solve", "yes" if rev["constrained"] else "fell back")
+        st.metric("Plausibility", f"{rev['mahalanobis_distance']:.1f}σ",
+                  help="Crisis-regime Mahalanobis distance; >3σ is implausible, >5σ effectively impossible.")
+        st.metric("Worst plausible loss", pct(rev.get("max_loss_within_bounds", float("nan"))),
+                  help="Largest loss achievable with factor moves inside plausible bounds.")
 
-    st.markdown("**Top single-factor paths to the same loss** (ranked by plausibility)")
+    st.markdown("**Top single-factor paths to the same loss** (feasible first; infeasible flagged)")
     adf = pd.DataFrame([{
         "Dominant factor": a["dominant_factor"],
-        "Shock": next((f"{v*1e4:+.0f}bps" if k in ("Rates", "Credit") else f"{v*100:+.1f}%")
-                      for k, v in a["shocks"].items() if abs(v) > 1e-9),
-        "Plausibility (σ)": f"{a['mahalanobis_distance']:.2f}",
+        "Shock": (f"{a['shock_value']*1e4:+.0f}bps" if a["dominant_factor"] in ("Rates", "Credit")
+                  else f"{a['shock_value']*100:+.0f}%"),
+        "Feasible?": "yes" if a.get("feasible_within_bounds") else "NO (exceeds bounds)",
+        "Plausibility (σ)": f"{a['mahalanobis_distance']:.1f}",
     } for a in rev["alternatives"]])
     st.dataframe(adf, use_container_width=True, hide_index=True)
+    st.caption("A single-factor path marked infeasible (e.g. a >100% index move) is a "
+               "mathematical artifact of forcing the whole loss through one factor — shown for "
+               "intuition, never as a plausible scenario.")
 
 # ================================================================ BACKTEST
 with tab_backtest:
@@ -268,10 +293,11 @@ with tab_model:
                  "VIF": f"{reg['vif'][f]:.1f}"} for f in reg["betas"]]
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         st.caption(f"R² = {reg['r_squared']:.3f} (adj {reg['adj_r_squared']:.3f}). "
-                   f"Condition number = {reg['condition_number']:.1f}. "
-                   f"VIF > ~5-10 flags multicollinearity (correlated factors that cannot be "
-                   f"cleanly separated) — disclosed rather than hidden. A realistic R² well "
-                   f"below 1.0 indicates the data is not a noiseless function of the factors.")
+                   f"Condition number = {reg['condition_number']:.1f}. VIF > ~5-10 flags "
+                   f"multicollinearity — disclosed, not hidden. Note: this R² is elevated "
+                   f"because the shipped data is factor-generated synthetic (see Limitations); "
+                   f"on real market data a 6-factor weekly model typically explains ~60-85%, "
+                   f"and the provider interface makes that swap one line of code.")
     except RuntimeError as exc:
         st.error(str(exc))
 

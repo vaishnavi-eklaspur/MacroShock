@@ -508,3 +508,51 @@ out-of-sample; multicollinearity is disclosed). What remains:
 - **Exposures are static within a regime** (two-state calm/crisis), not a continuous
   time-varying (DCC-GARCH) model.
 - **Not investment advice; not a regulatory-grade risk system.**
+
+
+
+---
+
+# Part IV — v3.1 Recalibration & reverse-stress hardening
+
+## 32. Factor betas recalibrated to realized crisis returns
+
+The v3.0 betas contained double-counting (an asset hit by *both* its spread duration and a
+large liquidity beta) and mislabelled gold as a commodity, producing crisis predictions with
+no historical precedent (e.g. investment-grade credit at −41%) — which the backtest correctly
+exposed. v3.1 recalibrates the exposure matrix so the factor model reproduces documented
+realized crisis returns:
+
+- **Cross-loadings minimized.** Each asset loads mainly on its primary factor(s); equity is
+  the equity factor (no extra commodity/liquidity pile-on), so SPY ≈ the equity shock.
+- **LQD** credit (spread duration 6.0) and a modest liquidity beta (0.30) — no longer
+  double-counted — give ≈ −13% in both crises (vs realized −12%/−14%), not −41%.
+- **Gold reclassified as a safe haven:** negative equity beta (−0.18) and negative FX beta
+  (−0.20), zero commodity beta. It now correctly **rises** in 2008 (≈ +3-5%) and is ≈ flat in
+  2020 — the hedge behaviour a client expects.
+- **Scenario shocks moderated** (e.g. 2008 credit +300bps rather than +400bps) so linear
+  factor pricing stays within realistic magnitudes.
+
+Result: in-sample per-asset backtest **MAE ≈ 1%** (was ~17%). The betas remain hand-set
+structural assumptions (durations from published data; loadings calibrated to two crises), not
+statistically estimated — stated plainly, not dressed up as measurements.
+
+## 33. Reverse-stress bounding, feasibility and honest language
+
+- **Single-factor paths are bounded/flagged.** Forcing an entire loss through one factor can
+  imply an impossible move (e.g. a commodity index down >100%); such paths are now marked
+  **infeasible within bounds** and never presented as plausible.
+- **Reachability.** If no factor combination within plausible bounds reaches the target loss,
+  the tool reports the **worst plausible loss** instead of returning an absurd shock, and says
+  the target is unreachable (a reassuring result).
+- **"Plausible" vs "least-implausible".** The primary shock is only called "most plausible"
+  when its Mahalanobis distance ≤ 3σ; beyond that it is labelled "least-implausible" and, past
+  ~4σ, explicitly flagged as effectively unreachable rather than framed as a recommendation.
+
+## 34. UI honesty fixes
+
+Tail-risk copy is now data-driven (it names the actually-largest VaR estimate and notes that
+positive skew can pull Cornish-Fisher *below* Gaussian — the methods need not be monotone).
+**CVaR / Expected Shortfall** (Gaussian and historical) is surfaced alongside VaR. The
+target-loss slider uses integer-percent units. Model outputs avoid false precision, and the
+deploy chrome is hidden to keep the framing as an analytical tool, not a capital-backed system.

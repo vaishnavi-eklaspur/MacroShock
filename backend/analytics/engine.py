@@ -199,14 +199,20 @@ class MacroShockEngine:
         narrative = commentary.reverse_commentary(
             target_loss=target_loss, shocks=res.shocks,
             mahalanobis_distance=res.mahalanobis_distance,
-            constrained=res.constrained,
-            top_alternative=res.alternatives[0] if res.alternatives else None,
+            constrained=res.constrained, reachable=res.reachable,
+            max_loss_within_bounds=res.max_loss_within_bounds,
+            plausibility_note=res.plausibility_note,
+            top_alternative=next((a for a in res.alternatives
+                                  if a.get("feasible_within_bounds")), None),
         )
         return {
             "shocks": res.shocks, "unconstrained_shocks": res.unconstrained_shocks,
             "gradient": res.gradient, "target_loss": res.target_loss,
             "implied_loss": res.implied_loss, "mahalanobis_distance": res.mahalanobis_distance,
-            "constrained": res.constrained, "alternatives": res.alternatives,
+            "constrained": res.constrained, "reachable": res.reachable,
+            "max_loss_within_bounds": res.max_loss_within_bounds,
+            "plausibility_note": res.plausibility_note,
+            "alternatives": res.alternatives,
             "factor_order": res.factor_order, "covariance_regime": "crisis",
             "commentary": narrative,
         }

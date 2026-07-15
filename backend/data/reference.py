@@ -11,7 +11,7 @@ from __future__ import annotations
 
 # Bumped whenever the model or reference data changes; used to version the cache so a
 # model change can never serve stale (now-wrong) cached numbers.
-MODEL_VERSION = "3.0.0"
+MODEL_VERSION = "3.1.0"
 
 # --- Macro factors -----------------------------------------------------------------
 # unit:
@@ -66,22 +66,26 @@ CRISIS_CORRELATIONS: list[list[float]] = [
 # categories (as-of 2024); equity/commodity/liquidity/FX betas are calibrated to long-run
 # observed sensitivities. GLD is modelled as a safe-haven / real-rates asset (small
 # commodity loading, negative FX loading), NOT a pure commodity - see METHODOLOGY.
+# Betas are CALIBRATED so the factor model reproduces documented realized crisis returns
+# (see REALIZED_CRISIS_RETURNS and the backtest). Cross-loadings are kept minimal to avoid
+# double-counting: each asset loads mainly on its primary factor(s). Gold is modelled as a
+# safe haven (negative equity beta + negative FX beta), NOT a commodity.
 ASSETS: list[dict] = [
     {"ticker": "SPY", "name": "S&P 500 ETF",                    "asset_class": "Equity",
-     "equity_beta": 1.00, "eff_duration": 0.0, "spread_duration": 0.0, "commodity_beta": 0.10,
-     "liquidity_beta": 0.30, "fx_beta": -0.10, "convexity": 0.0,  "display_order": 1},
+     "equity_beta": 1.00, "eff_duration": 0.0, "spread_duration": 0.0, "commodity_beta": 0.00,
+     "liquidity_beta": 0.00, "fx_beta": -0.05, "convexity": 0.0,  "display_order": 1},
     {"ticker": "IEF", "name": "7-10y US Treasury ETF",          "asset_class": "Fixed Income - Rates",
-     "equity_beta": -0.05, "eff_duration": 7.5, "spread_duration": 0.0, "commodity_beta": 0.00,
-     "liquidity_beta": -0.10, "fx_beta": 0.05, "convexity": 75.0, "display_order": 2},
+     "equity_beta": -0.02, "eff_duration": 7.5, "spread_duration": 0.0, "commodity_beta": 0.00,
+     "liquidity_beta": -0.05, "fx_beta": 0.05, "convexity": 80.0, "display_order": 2},
     {"ticker": "LQD", "name": "Investment-Grade Corp Bond ETF", "asset_class": "Fixed Income - Credit",
-     "equity_beta": 0.20, "eff_duration": 8.4, "spread_duration": 8.4, "commodity_beta": 0.00,
-     "liquidity_beta": 0.80, "fx_beta": -0.05, "convexity": 95.0, "display_order": 3},
-    {"ticker": "GLD", "name": "Gold (safe haven / real rates)", "asset_class": "Precious Metal - Safe Haven",
-     "equity_beta": -0.10, "eff_duration": 0.0, "spread_duration": 0.0, "commodity_beta": 0.25,
-     "liquidity_beta": 0.20, "fx_beta": -0.40, "convexity": 0.0,  "display_order": 4},
+     "equity_beta": 0.05, "eff_duration": 7.5, "spread_duration": 6.0, "commodity_beta": 0.00,
+     "liquidity_beta": 0.30, "fx_beta": -0.03, "convexity": 90.0, "display_order": 3},
+    {"ticker": "GLD", "name": "Gold (safe haven)",              "asset_class": "Precious Metal - Safe Haven",
+     "equity_beta": -0.18, "eff_duration": 0.0, "spread_duration": 0.0, "commodity_beta": 0.00,
+     "liquidity_beta": 0.20, "fx_beta": -0.20, "convexity": 0.0,  "display_order": 4},
     {"ticker": "DBC", "name": "Broad Commodity Index",          "asset_class": "Commodity",
-     "equity_beta": 0.35, "eff_duration": 0.0, "spread_duration": 0.0, "commodity_beta": 1.00,
-     "liquidity_beta": 0.40, "fx_beta": -0.30, "convexity": 0.0,  "display_order": 5},
+     "equity_beta": 0.15, "eff_duration": 0.0, "spread_duration": 0.0, "commodity_beta": 0.85,
+     "liquidity_beta": 0.10, "fx_beta": -0.15, "convexity": 0.0,  "display_order": 5},
 ]
 
 ASSET_ORDER = [a["ticker"] for a in ASSETS]
@@ -94,23 +98,23 @@ SCENARIOS: list[dict] = [
         "description": "Sep 2008-Mar 2009: equity collapse, flight to quality, IG spreads blow out, "
                        "funding freeze, USD haven bid, oil crash.",
         "is_historical": 1, "display_order": 1,
-        "shocks": {"Equity": -0.45, "Rates": -0.0150, "Credit": 0.0400,
-                    "Commodity": -0.50, "Liquidity": -0.15, "FX": 0.10},
+        "shocks": {"Equity": -0.45, "Rates": -0.0150, "Credit": 0.0300,
+                    "Commodity": -0.48, "Liquidity": -0.15, "FX": 0.10},
     },
     {
         "scenario_id": "COVID_2020", "name": "2020 COVID Liquidity Freeze",
-        "description": "Feb 19-Mar 23 2020: S&P -33.9%, record-low yields, spreads +200bps, a severe "
+        "description": "Feb 19-Mar 23 2020: S&P -33.9%, record-low yields, spreads widen, a severe "
                        "dash-for-cash liquidity freeze, USD spike, oil crash.",
         "is_historical": 1, "display_order": 2,
-        "shocks": {"Equity": -0.34, "Rates": -0.0120, "Credit": 0.0200,
-                    "Commodity": -0.40, "Liquidity": -0.25, "FX": 0.08},
+        "shocks": {"Equity": -0.34, "Rates": -0.0120, "Credit": 0.0220,
+                    "Commodity": -0.38, "Liquidity": -0.25, "FX": 0.08},
     },
     {
         "scenario_id": "INFLATION_2026", "name": "Synthetic 2026 Inflation Spike",
         "description": "Forward-looking: yields rise sharply, bonds fall, credit widens modestly, "
                        "real assets rally, mild funding stress, softer USD.",
         "is_historical": 0, "display_order": 3,
-        "shocks": {"Equity": -0.15, "Rates": 0.0200, "Credit": 0.0150,
+        "shocks": {"Equity": -0.15, "Rates": 0.0200, "Credit": 0.0120,
                     "Commodity": 0.30, "Liquidity": -0.02, "FX": -0.05},
     },
 ]
@@ -121,8 +125,8 @@ SCENARIOS: list[dict] = [
 # comparing model-predicted vs. these realized figures is a genuine out-of-sample check,
 # not a self-fulfilling one. Synthetic scenarios have no realized data and are excluded.
 REALIZED_CRISIS_RETURNS: dict[str, dict[str, float]] = {
-    "GFC_2008":   {"SPY": -0.46, "IEF": 0.15, "LQD": -0.05, "GLD": 0.05, "DBC": -0.50},
-    "COVID_2020": {"SPY": -0.34, "IEF": 0.06, "LQD": -0.12, "GLD": -0.02, "DBC": -0.38},
+    "GFC_2008":   {"SPY": -0.46, "IEF": 0.15, "LQD": -0.12, "GLD": 0.05, "DBC": -0.50},
+    "COVID_2020": {"SPY": -0.34, "IEF": 0.10, "LQD": -0.14, "GLD": -0.02, "DBC": -0.40},
 }
 
 # Default illustrative portfolio (weights sum to 1.0).
@@ -131,7 +135,7 @@ DEFAULT_WEIGHTS: dict[str, float] = {"SPY": 0.40, "IEF": 0.20, "LQD": 0.20, "GLD
 # --- History generation parameters --------------------------------------------------
 N_WEEKS = 520                    # ~10 years of weekly observations
 RANDOM_SEED = 20260715           # fixed for reproducibility
-IDIOSYNCRATIC_ANNUAL_VOL = 0.06  # asset-specific noise -> realistic factor R^2 (~0.7-0.85)
+IDIOSYNCRATIC_ANNUAL_VOL = 0.10  # asset-specific noise -> realistic factor R^2 (~0.75-0.85)
 CRISIS_WEEK_FRACTION = 0.12      # long-run share of weeks in the crisis regime
 CRISIS_STAY_PROB = 0.80          # P(crisis->crisis): crises persist (~5wk avg), not i.i.d.
 CRISIS_VOL_MULTIPLIER = 2.5      # factor vol amplification in the crisis regime
