@@ -486,11 +486,14 @@ with tab_backtest:
 
     oos = bt["out_of_sample"]
     st.caption(oos["note"])
-    b1, b2, b3 = st.columns(3)
+    b1, b2, b3, b4 = st.columns(4)
     b1.metric("OOS model RMSE (per asset)", pct(oos["overall_rmse_model"]))
     b2.metric("Skill vs. predict-zero", f"{oos['overall_skill_vs_zero']*100:+.0f}%",
               help="1 − model_RMSE / benchmark_RMSE. Positive = beats the benchmark.")
     b3.metric("Skill vs. repeat-last-crisis", f"{oos['overall_skill_vs_repeat']*100:+.0f}%")
+    b4.metric("Skill vs. equity-only", f"{oos.get('overall_skill_vs_equity_only', 0)*100:+.0f}%",
+              help="Does the full 6-factor model beat a naive equity-beta-only model? "
+                   "Positive = the extra factors (rates, credit, FX…) add real value.")
 
     # Overview: skill per crisis (all folds at a glance).
     folds = {r["scenario_name"]: r for r in oos["scenarios"].values()}

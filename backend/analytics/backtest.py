@@ -104,7 +104,7 @@ def out_of_sample_backtest(assets: pd.DataFrame, tickers: list[str],
     eq_idx = FACTOR_ORDER.index("Equity")
     crisis_ids = list(realized_all.keys())
     results = {}
-    all_model, all_zero, all_repeat = [], [], []
+    all_model, all_zero, all_repeat, all_equity = [], [], [], []
 
     for test_id in crisis_ids:
         train_ids = [c for c in crisis_ids if c != test_id]
@@ -155,15 +155,18 @@ def out_of_sample_backtest(assets: pd.DataFrame, tickers: list[str],
             "skill_vs_repeat": 1.0 - rmse_model / rmse_repeat if rmse_repeat > 0 else 0.0,
         }
         all_model.extend(e_model); all_zero.extend(e_zero); all_repeat.extend(e_repeat)
+        all_equity.extend(e_equity)
 
     rmse_model = _rmse(np.array(all_model))
     rmse_zero = _rmse(np.array(all_zero))
     rmse_repeat = _rmse(np.array(all_repeat))
+    rmse_equity = _rmse(np.array(all_equity))
     return {
         "scenarios": results,
         "overall_rmse_model": rmse_model,
         "overall_skill_vs_zero": 1.0 - rmse_model / rmse_zero if rmse_zero > 0 else 0.0,
         "overall_skill_vs_repeat": 1.0 - rmse_model / rmse_repeat if rmse_repeat > 0 else 0.0,
+        "overall_skill_vs_equity_only": 1.0 - rmse_model / rmse_equity if rmse_equity > 0 else 0.0,
         "note": "Out-of-sample (leakage-free): betas are estimated on the WEEKLY history — they "
                 "never see the crisis returns scored here — and factor shocks are implied from "
                 "OTHER crises to predict the held-out one. Across only 5 heterogeneous crises a "

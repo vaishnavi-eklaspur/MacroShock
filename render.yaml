@@ -1,0 +1,30 @@
+# Render Blueprint — one-click free deploy of the API + dashboard from this repo.
+# Deploy: push to GitHub, then on render.com -> New -> Blueprint -> pick this repo.
+# (Redis is omitted; the cache degrades gracefully. Free instances sleep when idle.)
+services:
+  - type: web
+    name: macroshock-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    plan: free
+    envVars:
+      - key: MACROSHOCK_DB
+        value: /app/dbdata/macroshock.db
+      - key: MACROSHOCK_SOURCE      # boot on real Yahoo data; falls back to synthetic offline
+        value: yahoo
+      - key: CORS_ORIGINS
+        value: "*"
+
+  - type: web
+    name: macroshock-dashboard
+    runtime: docker
+    rootDir: frontend
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: API_BASE
+        # If Render appends a suffix to the API's URL, update this in the dashboard's
+        # Environment settings after the first deploy.
+        value: https://macroshock-api.onrender.com

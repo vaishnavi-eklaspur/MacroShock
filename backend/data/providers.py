@@ -31,10 +31,11 @@ class CsvReturnsProvider:
 
 # Independent real-world proxies for the six macro factors (Yahoo tickers), in NATIVE units.
 # Equity/Commodity/FX are clean total-return / index series. Rates is the weekly change in the
-# 10y yield. Credit is a documented HY-excess proxy for spread change. Liquidity has no clean
-# free proxy — a licensed funding-stress series (Aladdin/Bloomberg) is required, so it is left
-# at zero here and flagged, rather than faked. Using these makes the factors INDEPENDENT of the
-# assets (not a projection of them), so estimated betas and R² are honest.
+# 10y yield. Credit is a documented HY-excess proxy for spread change. Liquidity uses the VIX
+# (market-stress / funding-liquidity proxy: VIX up => liquidity down). A licensed funding series
+# (Aladdin/Bloomberg TED/OIS) would be cleaner, but VIX is a defensible, non-degenerate free
+# proxy. Using these makes the factors INDEPENDENT of the assets (not a projection of them), so
+# estimated betas and R² are honest.
 FACTOR_PROXY_TICKERS = {
     "Equity": "^GSPC",        # S&P 500 total move
     "Commodity": "^SPGSCI",   # S&P GSCI commodity index
@@ -42,6 +43,7 @@ FACTOR_PROXY_TICKERS = {
     "Rates": "^TNX",          # 10y Treasury yield (percent) -> weekly change / 100
     "Credit_HY": "HYG",       # high-yield ETF, for the credit-spread proxy
     "Credit_RF": "IEF",       # duration-ish Treasury leg for the credit proxy
+    "Liquidity_VIX": "^VIX",  # volatility index -> market-liquidity stress proxy
 }
 
 
@@ -72,7 +74,9 @@ def download_factor_proxies(start: str = "2010-01-01", end: str | None = None) -
     out["Credit"] = -(ret[FACTOR_PROXY_TICKERS["Credit_HY"]]
                       - ret[FACTOR_PROXY_TICKERS["Credit_RF"]]) / 4.0
     out["Commodity"] = ret[FACTOR_PROXY_TICKERS["Commodity"]]
-    out["Liquidity"] = 0.0   # no clean free proxy; needs a licensed funding-stress series
+    # VIX spike => market-liquidity stress (factor return down). Scaled to a return-like
+    # magnitude; the exact scale is absorbed by the OLS-estimated betas downstream.
+    out["Liquidity"] = -ret[FACTOR_PROXY_TICKERS["Liquidity_VIX"]] * 0.05
     out["FX"] = ret[FACTOR_PROXY_TICKERS["FX"]]
     return out[FACTOR_ORDER].dropna(how="any")
 
