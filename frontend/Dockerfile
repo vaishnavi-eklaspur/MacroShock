@@ -12,5 +12,8 @@ COPY . .
 
 EXPOSE 8501
 
+# fileWatcherType=none: no code-reloading in prod (saves memory/CPU, avoids a watchdog
+# segfault source). gatherUsageStats=false trims background work on constrained hosts.
 CMD ["streamlit", "run", "streamlit_app.py", \
-     "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
+     "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", \
+     "--server.fileWatcherType=none", "--browser.gatherUsageStats=false"]

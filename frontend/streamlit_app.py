@@ -17,8 +17,19 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-API_BASE = os.getenv("API_BASE", "http://localhost:5000")
-API_KEY = os.getenv("MACROSHOCK_API_KEY")
+def _resolve(name: str, default: str = "") -> str:
+    """Read config from env first, then Streamlit secrets (for Streamlit Community Cloud)."""
+    v = os.getenv(name)
+    if v:
+        return v
+    try:
+        return str(st.secrets[name])   # type: ignore[index]
+    except Exception:
+        return default
+
+
+API_BASE = _resolve("API_BASE", "http://localhost:5000")
+API_KEY = _resolve("MACROSHOCK_API_KEY") or None
 st.set_page_config(page_title="MacroShock", page_icon="⚡", layout="wide")
 
 
