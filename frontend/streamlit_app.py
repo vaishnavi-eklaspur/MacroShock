@@ -191,7 +191,7 @@ td,th{{border:1px solid #ccc;padding:6px 10px;text-align:left}}
 <p class="muted">Educational demonstration — not investment advice.</p>"""
 
 
-def render_stress(result: dict, weights: dict, confidence: float):
+def render_stress(result: dict, weights: dict, confidence: float, key_prefix: str = ""):
     scenario = result["scenario"]
     riskd = result["risk"]
 
@@ -286,9 +286,11 @@ def render_stress(result: dict, weights: dict, confidence: float):
     st.subheader("📥 Export")
     d1, d2 = st.columns(2)
     d1.download_button("Download holdings (CSV)", holdings.to_csv(index=False),
-                       "macroshock_holdings.csv", "text/csv", use_container_width=True)
+                       "macroshock_holdings.csv", "text/csv", use_container_width=True,
+                       key=f"{key_prefix}_csv")
     d2.download_button("Download report (HTML)", build_report_html(result, weights),
                        "macroshock_report.html", "text/html", use_container_width=True,
+                       key=f"{key_prefix}_html",
                        help="Open in a browser and Print → Save as PDF for a shareable report.")
 
 
@@ -303,7 +305,7 @@ with tab_stress:
                           {"weights": weights, "scenario_id": scenario_id, "confidence": confidence})
     except RuntimeError as exc:
         st.error(str(exc)); st.stop()
-    render_stress(result, weights, confidence)
+    render_stress(result, weights, confidence, key_prefix="scn")
 
 # ================================================================ CUSTOM SCENARIO BUILDER
 with tab_custom:
@@ -328,7 +330,7 @@ with tab_custom:
         custom = api_post("/api/portfolio/custom-stress-test",
                           {"weights": weights, "shocks": shocks, "name": name,
                            "confidence": confidence})
-        render_stress(custom, weights, confidence)
+        render_stress(custom, weights, confidence, key_prefix="custom")
     except RuntimeError as exc:
         st.error(str(exc))
 
