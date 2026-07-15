@@ -444,9 +444,25 @@ with tab_backtest:
               help="1 − model_RMSE / benchmark_RMSE. Positive = beats the benchmark.")
     b3.metric("Skill vs. repeat-last-crisis", f"{oos['overall_skill_vs_repeat']*100:+.0f}%")
 
-    for sid, r in oos["scenarios"].items():
-        st.markdown(f"**Predict {r['scenario_name']}** (trained on {', '.join(r['trained_on'])}) — "
-                    f"skill vs zero {r['skill_vs_zero']*100:+.0f}%, vs repeat {r['skill_vs_repeat']*100:+.0f}%")
+    # Overview: skill per crisis (all folds at a glance).
+    folds = {r["scenario_name"]: r for r in oos["scenarios"].values()}
+    if folds:
+        ov = pd.DataFrame([{"Crisis": n, "vs predict-zero": r["skill_vs_zero"] * 100,
+                            "vs repeat-last": r["skill_vs_repeat"] * 100}
+                           for n, r in folds.items()])
+        figov = go.Figure()
+        figov.add_bar(name="Skill vs predict-zero", x=ov["Crisis"], y=ov["vs predict-zero"])
+        figov.add_bar(name="Skill vs repeat-last", x=ov["Crisis"], y=ov["vs repeat-last"])
+        figov.update_layout(barmode="group", height=340, yaxis_title="Skill % (higher = better)")
+        st.plotly_chart(figov, use_container_width=True)
+
+        # Interactive: pick a crisis fold to drill into.
+        choice = st.selectbox("🔎 Inspect a crisis fold", list(folds))
+        r = folds[choice]
+        st.markdown(f"**Predicting {choice}** — trained on {', '.join(r['trained_on'])}. "
+                    f"Skill vs zero **{r['skill_vs_zero']*100:+.0f}%**, vs repeat "
+                    f"**{r['skill_vs_repeat']*100:+.0f}%**. The held-out crisis's realized returns "
+                    f"never touch the prediction — a genuine out-of-sample test.")
         pa = pd.DataFrame(r["per_asset"])
         if not pa.empty:
             disp = pd.DataFrame({
@@ -456,13 +472,12 @@ with tab_backtest:
                 "Realized": (pa["realized"] * 100).map("{:.1f}%".format),
                 "Model error": (pa["error"] * 100).map("{:+.1f}%".format),
             })
+            st.dataframe(disp, use_container_width=True, hide_index=True)
             fig = go.Figure()
-            fig.add_bar(name="Model", x=pa["ticker"], y=pa["model"] * 100)
+            fig.add_bar(name="Model prediction", x=pa["ticker"], y=pa["model"] * 100)
             fig.add_bar(name="Realized", x=pa["ticker"], y=pa["realized"] * 100)
-            cA, cB = st.columns([1, 1])
-            cA.dataframe(disp, use_container_width=True, hide_index=True)
-            fig.update_layout(barmode="group", height=300, yaxis_title="Crisis-window return %")
-            cB.plotly_chart(fig, use_container_width=True)
+            fig.update_layout(barmode="group", height=400, yaxis_title="Crisis-window return %")
+            st.plotly_chart(fig, use_container_width=True)
 
     with st.expander("In-sample calibration check (not a skill test)"):
         st.caption(bt["in_sample"]["note"])
