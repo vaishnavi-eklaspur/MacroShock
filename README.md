@@ -32,6 +32,15 @@ institutional-grade capabilities and — importantly — is built to survive scr
    gracefully to reproducible synthetic data, and `/api/meta` always reports which is live.
 7. **Interactive dashboard.** Build custom shock scenarios, compare two portfolios side by side,
    save/load named portfolios (persisted server-side), and export a CSV/HTML consulting report.
+8. **Benchmark-relative analytics** — tracking error (calm + crisis), active-risk contribution,
+   factor tilts and active share vs. a strategic benchmark. This is how IPS actually manages
+   multi-asset model portfolios: relative to a benchmark, not in absolute terms.
+9. **An honest factor model.** Betas are OLS-*estimated* on independent factor history (mean R²
+   ≈ 0.64, not a tautological ~1.0), and the out-of-sample backtest uses betas that never saw the
+   crises they predict. See [`docs/DESIGN_AND_MATH.md`](docs/DESIGN_AND_MATH.md).
+
+**Two front-ends:** a Streamlit analyst dashboard and a **React + TypeScript** typed client
+(`frontend-react/`). Deploy always-on with [`deploy/azure/`](deploy/azure/README.md).
 
 Under the hood: a **6-factor** model (Equity, Rates, Credit, Commodity, **Liquidity, FX**),
 **persistent (Markov) regime-switching** fat-tailed data, **constant-correlation Ledoit–Wolf**
