@@ -40,3 +40,20 @@ class ReverseRequest(WeightsRequest):
 
 class RebalanceRequest(WeightsRequest):
     scenario_id: str = Field(..., min_length=1)
+
+
+class CustomStressRequest(WeightsRequest):
+    """A user-defined stress scenario: an arbitrary factor-shock vector."""
+    shocks: dict[str, float] = Field(..., description="Mapping {factor_name: shock} in native units.")
+    name: str = Field("Custom scenario", max_length=120)
+    confidence: float = Field(0.95, gt=0.5, lt=1.0)
+
+    @field_validator("shocks")
+    @classmethod
+    def _finite_shocks(cls, v: dict[str, float]) -> dict[str, float]:
+        if not v:
+            raise ValueError("'shocks' must be a non-empty object of {factor: shock}.")
+        for factor, s in v.items():
+            if not isinstance(s, (int, float)) or not math.isfinite(s):
+                raise ValueError(f"Shock for '{factor}' must be a finite number.")
+        return v

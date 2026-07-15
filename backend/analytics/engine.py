@@ -140,7 +140,20 @@ class MacroShockEngine:
                     alpha: float = 0.95) -> dict:
         if scenario_id not in self.scenarios:
             raise KeyError(f"Unknown scenario_id '{scenario_id}'")
-        scenario = self.scenarios[scenario_id]
+        return self._stress(weights, self.scenarios[scenario_id], alpha)
+
+    def custom_stress_test(self, weights: dict[str, float], shocks: dict[str, float],
+                           name: str = "Custom scenario", alpha: float = 0.95) -> dict:
+        """Stress-test against a user-defined factor-shock vector (the scenario builder)."""
+        scenario = {
+            "scenario_id": "CUSTOM", "name": name,
+            "description": "User-defined factor shocks.", "is_historical": False,
+            "shocks": {f: float(shocks.get(f, 0.0)) for f in self.factor_names},
+        }
+        return self._stress(weights, scenario, alpha)
+
+    def _stress(self, weights: dict[str, float], scenario: dict, alpha: float = 0.95) -> dict:
+        scenario_id = scenario["scenario_id"]
         shocks = scenario["shocks"]
         w = self.weight_vector(weights)
 

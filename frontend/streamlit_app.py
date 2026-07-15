@@ -2,11 +2,13 @@
 
 A portfolio consulting co-pilot: what breaks, why (regime-aware), which holding is to blame
 (with confidence intervals), how fat the tail is (with a normality test), the optimized trade
-that helps, reverse stress in the crisis regime, and an out-of-sample backtest with a skill
-score against naive benchmarks.
+that helps, reverse stress in the crisis regime, an out-of-sample backtest with a skill score,
+a custom-scenario builder, side-by-side portfolio comparison, and a downloadable report.
 """
 from __future__ import annotations
 
+import datetime as dt
+import json
 import os
 
 import pandas as pd
@@ -47,22 +49,73 @@ except Exception as exc:
 
 tickers = [a["ticker"] for a in assets]
 asset_names = {a["ticker"]: a["name"] for a in assets}
+factor_names = meta["factors"]
 
-st.title("⚡ MacroShock")
-st.caption("A portfolio consulting co-pilot — what breaks, why it breaks, which holding is to "
-           "blame, and the single trade that reduces the pain.")
+# --- named preset portfolios (weights in %) -----------------------------------------
+DEFAULTS = {"SPY": 20, "QQQ": 8, "IWM": 4, "EFA": 8, "EEM": 5, "IEF": 10, "TLT": 5,
+            "TIP": 5, "LQD": 10, "HYG": 5, "GLD": 6, "DBC": 4, "VNQ": 10}
+PRESETS = {
+    "Diversified (default)": DEFAULTS,
+    "60/40 (SPY / IEF)": {"SPY": 60, "IEF": 40},
+    "All-equity (SPY)": {"SPY": 100},
+    "All-weather (Dalio-style)": {"SPY": 30, "TLT": 40, "IEF": 15, "GLD": 8, "DBC": 7},
+    "Barbell (stocks + long bonds)": {"SPY": 50, "TLT": 50},
+}
+
+
+def weights_from_pct(pctmap: dict) -> dict:
+    total = sum(pctmap.get(t, 0) for t in tickers)
+    return {t: pctmap.get(t, 0) / total for t in tickers} if total else {}
+
+
+# Apply a pending preset/load BEFORE the sliders are built (Streamlit rule).
+for t in tickers:
+    st.session_state.setdefault(f"w_{t}", DEFAULTS.get(t, 0))
+if "_pending_weights" in st.session_state:
+    pend = st.session_state.pop("_pending_weights")
+    for t in tickers:
+        st.session_state[f"w_{t}"] = int(round(pend.get(t, 0)))
 
 # ---------------------------------------------------------------- sidebar
 st.sidebar.header("Portfolio")
-default_weights = {"SPY": 40, "IEF": 20, "LQD": 20, "GLD": 10, "DBC": 10}
-raw = {t: st.sidebar.slider(f"{t} — {asset_names[t]}", 0, 100, default_weights.get(t, 0), 1)
-       for t in tickers}
+
+preset_name = st.sidebar.selectbox("Preset", ["(keep current)"] + list(PRESETS))
+if st.sidebar.button("Apply preset", use_container_width=True) and preset_name != "(keep current)":
+    st.session_state["_pending_weights"] = PRESETS[preset_name]
+    st.rerun()
+
+with st.sidebar.expander("Adjust weights", expanded=True):
+    raw = {t: st.slider(f"{t} — {asset_names[t]}", 0, 100, key=f"w_{t}") for t in tickers}
+
 total = sum(raw.values())
 if total == 0:
     st.sidebar.error("Allocate some weight to at least one asset.")
     st.stop()
 weights = {t: v / total for t, v in raw.items()}
 st.sidebar.metric("Total allocation", f"{total}%", help="Weights are normalized to 100%.")
+
+# --- save / load / export named portfolios ------------------------------------------
+with st.sidebar.expander("Save / load portfolios"):
+    saved = st.session_state.setdefault("_saved", {})
+    name = st.text_input("Name", placeholder="e.g. Client A")
+    if st.button("Save current", use_container_width=True) and name:
+        saved[name] = dict(raw)
+        st.success(f"Saved '{name}'.")
+    if saved:
+        pick = st.selectbox("Load saved", ["-"] + list(saved))
+        if pick != "-" and st.button("Load selected", use_container_width=True):
+            st.session_state["_pending_weights"] = saved[pick]
+            st.rerun()
+        st.download_button("Export all (JSON)", json.dumps(saved, indent=2),
+                           "macroshock_portfolios.json", "application/json",
+                           use_container_width=True)
+    up = st.file_uploader("Import JSON", type="json")
+    if up is not None:
+        try:
+            saved.update(json.load(up))
+            st.success(f"Imported {len(saved)} portfolio(s).")
+        except Exception as exc:
+            st.error(f"Bad JSON: {exc}")
 
 st.sidebar.header("Scenario")
 scenario_labels = {s["scenario_id"]: s["name"] for s in scenarios}
@@ -72,22 +125,51 @@ confidence = st.sidebar.select_slider("VaR confidence", [0.90, 0.95, 0.975, 0.99
 
 st.sidebar.divider()
 rg = meta["regime"]
+src = meta.get("dataset", {}).get("source", "unknown")
+badge = "🟢 live" if src.startswith(("yahoo", "csv")) else "🟡 synthetic"
+st.sidebar.caption(f"Data: **{badge}** ({src})")
 st.sidebar.caption(f"Model v{meta['model_version']} · {meta['shrinkage_target'].split('(')[0].strip()} "
                    f"shrinkage δ={meta['shrinkage_intensity']:.2f}")
 st.sidebar.caption(f"Regime: {rg['n_crisis_weeks']}/{rg['n_weeks']} crisis weeks detected, "
                    f"vol {rg['vol_amplification']:.1f}× calm")
 
-tab_stress, tab_reverse, tab_backtest, tab_model = st.tabs(
-    ["Stress test", "Reverse stress", "Backtest (out-of-sample)", "Model & diagnostics"])
+st.title("⚡ MacroShock")
+st.caption("A portfolio consulting co-pilot — what breaks, why it breaks, which holding is to "
+           "blame, and the single trade that reduces the pain.")
 
-# ================================================================ STRESS TEST
-with tab_stress:
-    try:
-        result = api_post("/api/portfolio/stress-test",
-                          {"weights": weights, "scenario_id": scenario_id, "confidence": confidence})
-    except RuntimeError as exc:
-        st.error(str(exc)); st.stop()
 
+# ================================================================ shared renderer
+def fmt_shock(name: str, val: float) -> str:
+    return f"{val*1e4:+.0f}bps" if name in ("Rates", "Credit") else f"{val*100:+.1f}%"
+
+
+def build_report_html(result: dict, weights: dict) -> str:
+    scn = result["scenario"]
+    fp = result["factor_pnl_attribution"]
+    rows = "".join(
+        f"<tr><td>{t}</td><td>{asset_names[t]}</td><td>{weights[t]*100:.1f}%</td>"
+        f"<td>{result['per_asset_scenario_return'][t]*100:.1f}%</td>"
+        f"<td>{result['per_asset_pnl_contribution'][t]*100:.2f}%</td></tr>"
+        for t in tickers if weights[t] > 0)
+    factors = "".join(f"<tr><td>{k}</td><td>{v*100:+.2f}%</td></tr>" for k, v in fp.items())
+    return f"""<!doctype html><meta charset="utf-8"><title>MacroShock report</title>
+<style>body{{font-family:system-ui,Arial;margin:40px;color:#1a1a1a}}
+h1{{color:#b8860b}}table{{border-collapse:collapse;margin:12px 0}}
+td,th{{border:1px solid #ccc;padding:6px 10px;text-align:left}}
+.big{{font-size:28px;font-weight:700}}.muted{{color:#666}}</style>
+<h1>⚡ MacroShock — Stress Report</h1>
+<p class="muted">Generated {dt.datetime.now():%Y-%m-%d %H:%M} · scenario: <b>{scn['name']}</b></p>
+<p>{scn['description']}</p>
+<p class="big">Scenario drawdown: {result['portfolio_drawdown']*100:.2f}%</p>
+<h3>Investment commentary</h3><p>{result['commentary']}</p>
+<h3>Factor P&amp;L attribution</h3><table><tr><th>Factor</th><th>P&amp;L</th></tr>{factors}</table>
+<h3>Per-holding impact</h3>
+<table><tr><th>Ticker</th><th>Name</th><th>Weight</th><th>Scenario return</th><th>P&amp;L</th></tr>
+{rows}</table>
+<p class="muted">Educational demonstration — not investment advice.</p>"""
+
+
+def render_stress(result: dict, weights: dict, confidence: float):
     scenario = result["scenario"]
     riskd = result["risk"]
 
@@ -115,16 +197,11 @@ with tab_stress:
     with right:
         st.subheader("Risk share: calm vs. crisis regime")
         rc = result["risk_contribution"]
-        comp = pd.DataFrame({
-            "Ticker": tickers,
-            "Capital %": [weights[t] * 100 for t in tickers],
-            "Risk % (calm)": [rc["calm_percentage"][t] * 100 for t in tickers],
-            "Risk % (crisis)": [rc["stressed_percentage"][t] * 100 for t in tickers],
-        })
+        held = [t for t in tickers if weights[t] > 0]
         fig2 = go.Figure()
-        fig2.add_bar(name="Capital %", x=comp["Ticker"], y=comp["Capital %"])
-        fig2.add_bar(name="Risk % (calm)", x=comp["Ticker"], y=comp["Risk % (calm)"])
-        fig2.add_bar(name="Risk % (crisis)", x=comp["Ticker"], y=comp["Risk % (crisis)"])
+        fig2.add_bar(name="Capital %", x=held, y=[weights[t] * 100 for t in held])
+        fig2.add_bar(name="Risk % (calm)", x=held, y=[rc["calm_percentage"][t] * 100 for t in held])
+        fig2.add_bar(name="Risk % (crisis)", x=held, y=[rc["stressed_percentage"][t] * 100 for t in held])
         fig2.update_layout(barmode="group", height=360)
         st.plotly_chart(fig2, use_container_width=True)
 
@@ -149,27 +226,23 @@ with tab_stress:
 
     m = riskd["moments"]
     normal_txt = "REJECTS normality" if jb.get("normal_rejected") else "cannot reject normality"
-    labels = {"gaussian": "Gaussian", "student_t": "Student-t", "cornish_fisher": "Cornish-Fisher",
-              "historical": "Historical"}
-    fattest = labels.get(max(var, key=var.get), "one")
     cf_txt = "" if riskd.get("cornish_fisher_valid", True) else \
         " Cornish-Fisher is outside its validity domain here — defer to the historical figure."
     st.caption(f"Skew {m['skew']:.2f}, excess kurtosis {m['excess_kurtosis']:.2f}; Jarque-Bera "
-               f"p={jb['p_value']:.3g} → {normal_txt} (fitted Student-t ν={dof:.1f}). The largest "
-               f"1-week VaR is the **{fattest}** estimate. Note: positive skew can pull the "
-               f"Cornish-Fisher left tail *below* Gaussian even when kurtosis is high, so the "
-               f"methods need not be monotone; the historical and CVaR figures anchor the realized "
-               f"tail.{cf_txt}")
+               f"p={jb['p_value']:.3g} → {normal_txt} (fitted Student-t ν={dof:.1f}).{cf_txt}")
 
     st.subheader("Per-holding scenario impact")
-    pas, pnl = result["per_asset_scenario_return"], result["per_asset_pnl_contribution"]
-    st.dataframe(pd.DataFrame({
-        "Ticker": tickers, "Name": [asset_names[t] for t in tickers],
-        "Weight": [f"{weights[t]*100:.1f}%" for t in tickers],
-        "Scenario return": [f"{pas[t]*100:.1f}%" for t in tickers],
-        "P&L contribution": [f"{pnl[t]*100:.2f}%" for t in tickers],
-        "Risk % (crisis)": [f"{rc['stressed_percentage'][t]*100:.1f}%" for t in tickers],
-    }), use_container_width=True, hide_index=True)
+    pas, pnl, rc = result["per_asset_scenario_return"], result["per_asset_pnl_contribution"], \
+        result["risk_contribution"]
+    held = [t for t in tickers if weights[t] > 0]
+    holdings = pd.DataFrame({
+        "Ticker": held, "Name": [asset_names[t] for t in held],
+        "Weight": [f"{weights[t]*100:.1f}%" for t in held],
+        "Scenario return": [f"{pas[t]*100:.1f}%" for t in held],
+        "P&L contribution": [f"{pnl[t]*100:.2f}%" for t in held],
+        "Risk % (crisis)": [f"{rc['stressed_percentage'][t]*100:.1f}%" for t in held],
+    })
+    st.dataframe(holdings, use_container_width=True, hide_index=True)
 
     reb = result["rebalance"]
     st.subheader("🔧 Recommended mitigation (constrained optimization)")
@@ -179,15 +252,110 @@ with tab_stress:
         r2.metric("Scenario drawdown", pct(reb["new_drawdown"]), f"{reb['drawdown_improvement']*100:+.2f}%")
         r3.metric("Turnover", pct(reb.get("turnover", 0.0)))
         st.caption(reb.get("method", "constrained optimization"))
-        wd = pd.DataFrame({
-            "Ticker": tickers,
-            "Current": [f"{reb['old_weights'][t]*100:.1f}%" for t in tickers],
-            "Optimized": [f"{reb['new_weights'][t]*100:.1f}%" for t in tickers],
-        })
-        st.dataframe(wd, use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame({
+            "Ticker": held,
+            "Current": [f"{reb['old_weights'][t]*100:.1f}%" for t in held],
+            "Optimized": [f"{reb['new_weights'][t]*100:.1f}%" for t in held],
+        }), use_container_width=True, hide_index=True)
     else:
         st.write("The constrained optimizer finds no turnover-limited trade that reduces crisis "
                  "risk without worsening the scenario — the allocation is already efficient here.")
+
+    st.subheader("📥 Export")
+    d1, d2 = st.columns(2)
+    d1.download_button("Download holdings (CSV)", holdings.to_csv(index=False),
+                       "macroshock_holdings.csv", "text/csv", use_container_width=True)
+    d2.download_button("Download report (HTML)", build_report_html(result, weights),
+                       "macroshock_report.html", "text/html", use_container_width=True,
+                       help="Open in a browser and Print → Save as PDF for a shareable report.")
+
+
+tab_stress, tab_custom, tab_compare, tab_reverse, tab_backtest, tab_model = st.tabs(
+    ["Stress test", "Scenario builder", "Compare A/B", "Reverse stress",
+     "Backtest (out-of-sample)", "Model & diagnostics"])
+
+# ================================================================ STRESS TEST
+with tab_stress:
+    try:
+        result = api_post("/api/portfolio/stress-test",
+                          {"weights": weights, "scenario_id": scenario_id, "confidence": confidence})
+    except RuntimeError as exc:
+        st.error(str(exc)); st.stop()
+    render_stress(result, weights, confidence)
+
+# ================================================================ CUSTOM SCENARIO BUILDER
+with tab_custom:
+    st.subheader("🎛️ Build your own scenario")
+    st.caption("Set any factor shocks and price the portfolio instantly — the same attribution, "
+               "tail and mitigation engine, against a shock vector you define.")
+    name = st.text_input("Scenario name", "My scenario")
+    cols = st.columns(3)
+    ui = {
+        "Equity": cols[0].slider("Equity shock (%)", -60, 60, -25, 1),
+        "Commodity": cols[0].slider("Commodity shock (%)", -70, 70, 0, 1),
+        "Rates": cols[1].slider("Rates Δyield (bps)", -400, 400, 50, 5),
+        "Credit": cols[1].slider("Credit Δspread (bps)", -200, 800, 150, 5),
+        "Liquidity": cols[2].slider("Liquidity shock (%)", -50, 20, -5, 1),
+        "FX": cols[2].slider("USD (FX) shock (%)", -25, 25, 5, 1),
+    }
+    shocks = {"Equity": ui["Equity"] / 100, "Commodity": ui["Commodity"] / 100,
+              "Rates": ui["Rates"] / 1e4, "Credit": ui["Credit"] / 1e4,
+              "Liquidity": ui["Liquidity"] / 100, "FX": ui["FX"] / 100}
+    shocks = {f: shocks.get(f, 0.0) for f in factor_names}
+    try:
+        custom = api_post("/api/portfolio/custom-stress-test",
+                          {"weights": weights, "shocks": shocks, "name": name,
+                           "confidence": confidence})
+        render_stress(custom, weights, confidence)
+    except RuntimeError as exc:
+        st.error(str(exc))
+
+# ================================================================ COMPARE A/B
+with tab_compare:
+    st.subheader("⚖️ Compare two portfolios under the same shock")
+    st.caption(f"Portfolio **A** = your current sidebar allocation. Pick **B** below; both are "
+               f"stressed under **{scenario_labels[scenario_id]}**.")
+    options = {f"Preset · {k}": v for k, v in PRESETS.items()}
+    options.update({f"Saved · {k}": v for k, v in st.session_state.get("_saved", {}).items()})
+    b_label = st.selectbox("Portfolio B", list(options))
+    wB = weights_from_pct(options[b_label])
+    try:
+        rA = api_post("/api/portfolio/stress-test",
+                      {"weights": weights, "scenario_id": scenario_id, "confidence": confidence})
+        rB = api_post("/api/portfolio/stress-test",
+                      {"weights": wB, "scenario_id": scenario_id, "confidence": confidence})
+    except RuntimeError as exc:
+        st.error(str(exc)); st.stop()
+
+    def worst_factor(r):
+        fp = r["factor_pnl_attribution"]
+        return min(fp, key=fp.get)
+
+    comp = pd.DataFrame({
+        "Metric": ["Scenario drawdown", f"Historical VaR ({confidence:.0%})", "Annualized vol",
+                   "Worst factor", "Crisis vol after fix"],
+        "A (current)": [pct(rA["portfolio_drawdown"]), pct(rA["risk"]["var"]["historical"]),
+                        pct(rA["risk"]["volatility_annual"]), worst_factor(rA),
+                        pct(rA["rebalance"]["new_volatility"])],
+        "B (" + b_label.split("· ")[-1] + ")": [
+            pct(rB["portfolio_drawdown"]), pct(rB["risk"]["var"]["historical"]),
+            pct(rB["risk"]["volatility_annual"]), worst_factor(rB),
+            pct(rB["rebalance"]["new_volatility"])],
+    })
+    st.dataframe(comp, use_container_width=True, hide_index=True)
+
+    fig = go.Figure()
+    fig.add_bar(name="A (current)", x=["Drawdown", "Hist VaR", "Ann vol"],
+                y=[rA["portfolio_drawdown"] * 100, rA["risk"]["var"]["historical"] * 100,
+                   rA["risk"]["volatility_annual"] * 100])
+    fig.add_bar(name=f"B ({b_label.split('· ')[-1]})", x=["Drawdown", "Hist VaR", "Ann vol"],
+                y=[rB["portfolio_drawdown"] * 100, rB["risk"]["var"]["historical"] * 100,
+                   rB["risk"]["volatility_annual"] * 100])
+    fig.update_layout(barmode="group", height=380, yaxis_title="%")
+    st.plotly_chart(fig, use_container_width=True)
+    dd = (rB["portfolio_drawdown"] - rA["portfolio_drawdown"]) * 100
+    st.info(f"Under {scenario_labels[scenario_id]}, **B draws down {abs(dd):.1f}pp "
+            f"{'less' if dd > 0 else 'more'}** than A.")
 
 # ================================================================ REVERSE STRESS
 with tab_reverse:
@@ -214,8 +382,7 @@ with tab_reverse:
             else "least-implausible joint shock"
         sdf = pd.DataFrame({
             "Factor": list(shocks.keys()),
-            "Implied shock": [f"{v*1e4:+.0f}bps" if k in ("Rates", "Credit") else f"{v*100:+.1f}%"
-                              for k, v in shocks.items()],
+            "Implied shock": [fmt_shock(k, v) for k, v in shocks.items()],
         })
         st.markdown(f"**{label.capitalize()}** (bounded, crisis-regime)")
         st.dataframe(sdf, use_container_width=True, hide_index=True)
@@ -228,8 +395,7 @@ with tab_reverse:
     st.markdown("**Top single-factor paths to the same loss** (feasible first; infeasible flagged)")
     adf = pd.DataFrame([{
         "Dominant factor": a["dominant_factor"],
-        "Shock": (f"{a['shock_value']*1e4:+.0f}bps" if a["dominant_factor"] in ("Rates", "Credit")
-                  else f"{a['shock_value']*100:+.0f}%"),
+        "Shock": fmt_shock(a["dominant_factor"], a["shock_value"]),
         "Feasible?": "yes" if a.get("feasible_within_bounds") else "NO (exceeds bounds)",
         "Plausibility (σ)": f"{a['mahalanobis_distance']:.1f}",
     } for a in rev["alternatives"]])
@@ -294,10 +460,7 @@ with tab_model:
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         st.caption(f"R² = {reg['r_squared']:.3f} (adj {reg['adj_r_squared']:.3f}). "
                    f"Condition number = {reg['condition_number']:.1f}. VIF > ~5-10 flags "
-                   f"multicollinearity — disclosed, not hidden. Note: this R² is elevated "
-                   f"because the shipped data is factor-generated synthetic (see Limitations); "
-                   f"on real market data a 6-factor weekly model typically explains ~60-85%, "
-                   f"and the provider interface makes that swap one line of code.")
+                   f"multicollinearity — disclosed, not hidden.")
     except RuntimeError as exc:
         st.error(str(exc))
 
@@ -305,12 +468,13 @@ with tab_model:
     try:
         rr = api_post("/api/portfolio/risk-contribution", {"weights": weights})
         ci = rr["pctr_confidence_interval"]
+        held = [t for t in tickers if weights[t] > 0]
         cidf = pd.DataFrame({
-            "Ticker": tickers,
-            "Capital %": [f"{weights[t]*100:.1f}%" for t in tickers],
-            "Risk % (point)": [f"{ci[t]['point']*100:.1f}%" for t in tickers],
+            "Ticker": held,
+            "Capital %": [f"{weights[t]*100:.1f}%" for t in held],
+            "Risk % (point)": [f"{ci[t]['point']*100:.1f}%" for t in held],
             f"{int(rr['pctr_ci_confidence']*100)}% CI": [
-                f"[{ci[t]['lower']*100:.1f}%, {ci[t]['upper']*100:.1f}%]" for t in tickers],
+                f"[{ci[t]['lower']*100:.1f}%, {ci[t]['upper']*100:.1f}%]" for t in held],
         })
         st.dataframe(cidf, use_container_width=True, hide_index=True)
         st.caption("Block-bootstrap intervals: MCTR is a noisy estimate, so point values are "
