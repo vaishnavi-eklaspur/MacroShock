@@ -32,7 +32,7 @@ import os
 import time
 from collections import defaultdict
 
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 from pydantic import ValidationError
 
 from data import database
@@ -62,21 +62,44 @@ def create_app() -> Flask:
     api_key = os.getenv("MACROSHOCK_API_KEY")            # unset => open (local demo)
     rate_per_min = int(os.getenv("MACROSHOCK_RATE_PER_MIN", "120"))
     hits: dict[str, list[float]] = defaultdict(list)
+    metrics: dict[str, int] = defaultdict(int)           # {(path,status): count}
 
     @app.before_request
     def _guard():
+        g.t0 = time.perf_counter()
         # Optional API-key auth on mutating/compute endpoints; GET/health stay open.
         if api_key and request.method in ("POST", "DELETE"):
             if request.headers.get("X-API-Key") != api_key:
                 return jsonify({"error": "Unauthorized: missing or invalid X-API-Key."}), 401
-        # ponytail: in-process fixed-window limiter; front with nginx/Redis for multi-worker.
         if request.method in ("POST", "DELETE"):
             ip = request.remote_addr or "?"
-            now = time.time()
-            recent = hits[ip] = [t for t in hits[ip] if now - t < 60]
-            if len(recent) >= rate_per_min:
+            allowed = cache.rate_hit(ip, rate_per_min)   # Redis-backed, shared across workers
+            if allowed is None:                          # Redis down: in-process fallback
+                now = time.time()
+                recent = hits[ip] = [t for t in hits[ip] if now - t < 60]
+                allowed = len(recent) < rate_per_min
+                if allowed:
+                    recent.append(now)
+            if not allowed:
                 return jsonify({"error": "Rate limit exceeded; slow down."}), 429
-            recent.append(now)
+
+    @app.after_request
+    def _observe(resp):
+        path = (request.url_rule.rule if request.url_rule else request.path)
+        metrics[f'{path}|{resp.status_code}'] += 1
+        dt_ms = (time.perf_counter() - getattr(g, "t0", time.perf_counter())) * 1000
+        logger.info('method=%s path=%s status=%s latency_ms=%.1f',
+                    request.method, path, resp.status_code, dt_ms)
+        return resp
+
+    @app.get("/metrics")
+    def prometheus_metrics():
+        lines = ["# HELP macroshock_requests_total Total HTTP requests by route and status.",
+                 "# TYPE macroshock_requests_total counter"]
+        for k, v in metrics.items():
+            path, status = k.rsplit("|", 1)
+            lines.append(f'macroshock_requests_total{{path="{path}",status="{status}"}} {v}')
+        return "\n".join(lines) + "\n", 200, {"Content-Type": "text/plain; version=0.0.4"}
 
     def check_tickers(weights: dict[str, float]) -> None:
         unknown = set(weights) - set(engine.tickers)

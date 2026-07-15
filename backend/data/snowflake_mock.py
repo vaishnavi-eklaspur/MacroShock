@@ -57,8 +57,12 @@ class MockSnowflakeConnection:
 
     def __init__(self, db_path: str | os.PathLike | None = None):
         self._db_path = str(db_path or os.getenv("MACROSHOCK_DB", DEFAULT_DB_PATH))
-        self._conn = sqlite3.connect(self._db_path)
+        self._conn = sqlite3.connect(self._db_path, timeout=5.0)
         self._conn.execute("PRAGMA foreign_keys = ON;")
+        # WAL + busy timeout: concurrent readers don't block the writer, and writers wait
+        # briefly for a lock instead of failing - matters with multiple gunicorn workers.
+        self._conn.execute("PRAGMA journal_mode = WAL;")
+        self._conn.execute("PRAGMA busy_timeout = 5000;")
 
     def cursor(self) -> MockCursor:
         return MockCursor(self._conn.cursor())

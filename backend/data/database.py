@@ -11,12 +11,13 @@ import json as _json
 
 import pandas as pd
 
-from . import snowflake_mock
+from . import warehouse
 from .reference import ASSET_ORDER, FACTOR_ORDER
 
 
-def _conn(db_path: str | None = None) -> snowflake_mock.MockSnowflakeConnection:
-    return snowflake_mock.connect(database=db_path)
+def _conn(db_path: str | None = None):
+    # Mock SQLite by default; real Snowflake when MACROSHOCK_WAREHOUSE=snowflake (see warehouse.py).
+    return warehouse.connect(database=db_path)
 
 
 def get_assets(db_path: str | None = None) -> pd.DataFrame:

@@ -59,6 +59,24 @@ class Cache:
         digest = hashlib.sha256(blob.encode()).hexdigest()[:32]
         return f"macroshock:v{MODEL_VERSION}:{prefix}:{digest}"
 
+    def rate_hit(self, ip: str, limit: int, window: int = 60) -> bool | None:
+        """Fixed-window rate check backed by Redis (shared across workers).
+
+        Returns True if allowed, False if over the limit, or None if Redis is unavailable
+        (so the caller can fall back to an in-process limiter). This makes the limit real
+        under multiple gunicorn workers, unlike a per-process counter.
+        """
+        if not self._enabled:
+            return None
+        try:
+            key = f"macroshock:rl:{ip}"
+            n = self._client.incr(key)                 # type: ignore[union-attr]
+            if n == 1:
+                self._client.expire(key, window)       # type: ignore[union-attr]
+            return int(n) <= limit
+        except Exception:  # pragma: no cover - degrade to in-process
+            return None
+
     def get_or_compute(self, prefix: str, payload: dict[str, Any],
                        compute: Callable[[], dict]) -> tuple[dict, bool]:
         """Return (result, cache_hit). Falls back to compute() on any cache error."""
