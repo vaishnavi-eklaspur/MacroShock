@@ -1,6 +1,7 @@
 {
   "name": "macroshock-react",
   "private": true,
+  "license": "UNLICENSED",
   "version": "1.0.0",
   "type": "module",
   "description": "TypeScript + React client for the MacroShock API (typed API client + stress-test view).",
