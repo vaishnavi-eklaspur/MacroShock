@@ -26,18 +26,37 @@ def _headers() -> dict:
     return {"X-API-Key": API_KEY} if API_KEY else {}
 
 
+def _parse(r) -> dict:
+    """Parse a JSON response, turning API errors and non-JSON bodies into clear messages
+    (instead of a raw JSONDecodeError) — e.g. a wrong API_BASE or a free-tier cold start."""
+    try:
+        body = r.json()
+    except ValueError:
+        snippet = (r.text or "").strip()[:180]
+        raise RuntimeError(
+            f"API at {API_BASE} returned non-JSON ({r.status_code}). Check the dashboard's "
+            f"API_BASE points at the API service, and that it's awake (free tiers sleep — "
+            f"retry in ~30s). Body: {snippet!r}")
+    if r.status_code >= 400:
+        raise RuntimeError(body.get("error", f"{r.status_code} {r.reason}"))
+    return body
+
+
 @st.cache_data(ttl=60)
 def api_get(path: str) -> dict:
-    r = requests.get(f"{API_BASE}{path}", timeout=30)
-    r.raise_for_status()
-    return r.json()
+    try:
+        r = requests.get(f"{API_BASE}{path}", timeout=30)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Cannot reach API at {API_BASE} ({exc}).")
+    return _parse(r)
 
 
 def api_post(path: str, payload: dict) -> dict:
-    r = requests.post(f"{API_BASE}{path}", json=payload, timeout=30, headers=_headers())
-    if r.status_code >= 400:
-        raise RuntimeError(r.json().get("error", r.text))
-    return r.json()
+    try:
+        r = requests.post(f"{API_BASE}{path}", json=payload, timeout=30, headers=_headers())
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Cannot reach API at {API_BASE} ({exc}).")
+    return _parse(r)
 
 
 def api_delete(path: str) -> dict:
@@ -56,7 +75,10 @@ try:
     scenarios = api_get("/api/scenarios")["scenarios"]
     meta = api_get("/api/meta")
 except Exception as exc:
-    st.error(f"Cannot reach the MacroShock API at {API_BASE}. Is the backend running? ({exc})")
+    st.error(f"Cannot reach the MacroShock API at `{API_BASE}`.\n\n{exc}")
+    st.info("If deployed: check the dashboard's **API_BASE** env var points at the API "
+            "service's real URL, and that the API is awake (free tiers sleep — wait ~30s and "
+            "refresh). Locally: is the backend running?")
     st.stop()
 
 tickers = [a["ticker"] for a in assets]
