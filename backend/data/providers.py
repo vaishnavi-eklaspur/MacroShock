@@ -1,45 +1,20 @@
-"""Pluggable return-data providers.
+"""Real-data loaders: CSV and Yahoo Finance sources of weekly asset returns.
 
-The analytics never assume where returns come from. This interface is the single swap point
-between the shipped (calibrated, reproducible) synthetic data and real market data. To go
-live you implement/enable one provider - no analytics change required.
-
-Providers return a wide DataFrame of periodic returns: index = date (str/DatetimeIndex),
-columns = tickers, values = periodic (weekly) total returns.
+Each returns a wide DataFrame: index = date, columns = tickers, values = weekly total
+returns. `seed.build_returns` picks one by `--source`; the default synthetic data reads the
+warehouse directly (`data.database`), so no loader is needed for it.
 """
 from __future__ import annotations
 
-import abc
 from pathlib import Path
 
 import pandas as pd
 
 
-class ReturnsProvider(abc.ABC):
-    """Abstract source of periodic asset returns."""
-
-    @abc.abstractmethod
-    def get_asset_returns(self) -> pd.DataFrame:
-        """Wide DataFrame: index = date, columns = tickers, values = weekly returns."""
-        raise NotImplementedError
-
-
-class DatabaseProvider(ReturnsProvider):
-    """Reads the seeded SQLite/warehouse table (the default, reproducible source)."""
-
-    def __init__(self, db_path: str | None = None):
-        self.db_path = db_path
-
-    def get_asset_returns(self) -> pd.DataFrame:
-        from . import database  # local import to avoid a cycle at module load
-        return database.get_asset_returns(self.db_path)
-
-
-class CsvReturnsProvider(ReturnsProvider):
+class CsvReturnsProvider:
     """Reads a CSV of weekly returns (first column = date, remaining columns = tickers).
 
-    This is the simplest path to real data: export returns from any source to CSV and point
-    the engine at this provider. Example CSV:
+    The simplest path to real data: export returns from any source to CSV. Example:
 
         date,SPY,IEF,LQD,GLD,DBC
         2020-01-03,0.012,-0.003,0.001,0.004,-0.010
@@ -102,7 +77,7 @@ def download_factor_proxies(start: str = "2010-01-01", end: str | None = None) -
     return out[FACTOR_ORDER].dropna(how="any")
 
 
-class YFinanceReturnsProvider(ReturnsProvider):
+class YFinanceReturnsProvider:
     """Live provider (requires network + `yfinance`). Import-guarded so it never breaks the
     default build. Downloads adjusted closes and computes weekly total returns.
 
@@ -122,7 +97,7 @@ class YFinanceReturnsProvider(ReturnsProvider):
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError(
                 "yfinance is not installed. `pip install yfinance` to use live data, or use "
-                "CsvReturnsProvider / DatabaseProvider instead."
+                "CsvReturnsProvider instead."
             ) from exc
         prices = yf.download(self.tickers, start=self.start, end=self.end,
                              auto_adjust=True, progress=False)["Close"]

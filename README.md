@@ -48,7 +48,7 @@ shrinkage, **chi-square regime detection** (no top-x% selection bias), **regime-
 risk attribution with **bootstrap confidence intervals**, **out-of-sample** cross-crisis
 backtesting with a **skill score**, a **Jarque–Bera** normality test with an **MLE-fitted
 Student-t** dof, **VIF / condition-number** multicollinearity diagnostics, a **constrained
-(SLSQP) optimizer** rebalance, a pluggable **real-data provider** interface, pydantic-validated
+(SLSQP) optimizer** rebalance, **CSV / Yahoo real-data loaders**, pydantic-validated
 API, and a **model-versioned** cache.
 
 Every formula is documented and independently verified — see

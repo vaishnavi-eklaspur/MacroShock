@@ -484,10 +484,10 @@ volatility change, and the turnover.
 
 ## 30. Real-data path (the one residual)
 
-`data/providers.py` defines a `ReturnsProvider` interface with three implementations:
-`DatabaseProvider` (default, reproducible), `CsvReturnsProvider` (export real returns to CSV
-and point the engine at it), and an import-guarded `YFinanceReturnsProvider` (live data when a
-network and `yfinance` are available). Swapping data sources requires no analytics change.
+`data/providers.py` has two real-data loaders: `CsvReturnsProvider` (export real returns to
+CSV and point the engine at it) and an import-guarded `YFinanceReturnsProvider` (live data
+when a network and `yfinance` are available). The default synthetic data reads the warehouse
+directly, so no loader is needed for it. Swapping data sources requires no analytics change.
 
 This is now **wired into the seed** via `python -m data.seed --source {synthetic,csv,yahoo}`:
 
