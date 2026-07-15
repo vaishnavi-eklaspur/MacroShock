@@ -93,6 +93,16 @@ def get_scenario(scenario_id: str, db_path: str | None = None) -> dict | None:
     return None
 
 
+def get_dataset_meta(db_path: str | None = None) -> dict[str, str]:
+    """Provenance of the loaded return history (source, window, model version)."""
+    with _conn(db_path) as c:
+        try:
+            rows = c.cursor().execute("SELECT key, value FROM dataset_meta").fetchall()
+        except Exception:
+            return {"source": "unknown"}
+    return {k: v for k, v in rows}
+
+
 def get_realized_crisis_returns(db_path: str | None = None) -> dict[str, dict[str, float]]:
     """Realized crisis returns keyed {scenario_id: {ticker: realized_return}} for backtesting."""
     sql = "SELECT scenario_id, ticker, realized_return FROM realized_crisis_returns"

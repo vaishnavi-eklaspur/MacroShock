@@ -49,6 +49,7 @@ class MacroShockEngine:
 
         self.scenarios = {s["scenario_id"]: s for s in database.get_scenarios(self.db_path)}
         self.realized = database.get_realized_crisis_returns(self.db_path)
+        self.dataset_meta = database.get_dataset_meta(self.db_path)
 
     # ------------------------------------------------------------------ helpers
     def weight_vector(self, weights: dict[str, float]) -> np.ndarray:
@@ -69,6 +70,7 @@ class MacroShockEngine:
             "regime": self.regime_summary,
             "crisis_cov_used_fallback": bool(self.stressed_fallback),
             "factors": self.factor_names,
+            "dataset": self.dataset_meta,
         }
 
     # ------------------------------------------------------------------ analytics

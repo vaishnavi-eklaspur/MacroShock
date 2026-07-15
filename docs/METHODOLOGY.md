@@ -489,6 +489,21 @@ volatility change, and the turnover.
 and point the engine at it), and an import-guarded `YFinanceReturnsProvider` (live data when a
 network and `yfinance` are available). Swapping data sources requires no analytics change.
 
+This is now **wired into the seed** via `python -m data.seed --source {synthetic,csv,yahoo}`:
+
+- `synthetic` (default) — the reproducible two-regime generator.
+- `csv --csv PATH` — a weekly-returns file (`date,SPY,IEF,…`).
+- `yahoo --start YYYY-MM-DD` — live download of the 13-asset universe via `yfinance`.
+
+For real sources, **factor returns are derived from realized asset returns by projection
+onto the exposure matrix**: per week `f_t = pinv(B) a_t`. This produces native-unit factor
+histories (yield/spread changes, index returns) consistent with the documented loadings,
+rather than scraping unreliable free proxies for credit-spread or liquidity factor levels —
+the same least-squares inversion the backtest uses for implied shocks. Any failure (offline,
+missing `yfinance`, malformed CSV) **degrades gracefully to synthetic** and records the fact.
+The active source and window are stored in `dataset_meta` and surfaced at `/api/meta` and
+`/health` (`data_source`), so a consumer always knows whether numbers are live or simulated.
+
 ---
 
 ## 31. Limitations (v3 — what genuinely remains)

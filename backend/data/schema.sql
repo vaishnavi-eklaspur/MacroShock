@@ -18,6 +18,12 @@ CREATE TABLE IF NOT EXISTS assets (
     display_order   INTEGER NOT NULL DEFAULT 0
 );
 
+-- Provenance: how the return history in this database was built (source + window).
+CREATE TABLE IF NOT EXISTS dataset_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 -- Reference: the macro risk factors.
 CREATE TABLE IF NOT EXISTS factors (
     name        TEXT PRIMARY KEY,

@@ -62,7 +62,8 @@ def create_app() -> Flask:
     @app.get("/health")
     def health():
         return jsonify({"status": "ok", "cache_enabled": cache.enabled,
-                        "model_version": engine.model_version, "assets": engine.tickers})
+                        "model_version": engine.model_version, "assets": engine.tickers,
+                        "data_source": engine.dataset_meta.get("source", "unknown")})
 
     @app.get("/api/meta")
     def meta():
