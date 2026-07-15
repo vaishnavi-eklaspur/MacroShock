@@ -169,9 +169,12 @@ confidence = st.sidebar.select_slider("VaR confidence", [0.90, 0.95, 0.975, 0.99
 
 st.sidebar.divider()
 rg = meta["regime"]
-src = meta.get("dataset", {}).get("source", "unknown")
-badge = "🟢 live" if src.startswith(("yahoo", "csv")) else "🟡 synthetic"
-st.sidebar.caption(f"Data: **{badge}** ({src})")
+ds = meta.get("dataset", {})
+src = ds.get("source", "unknown")
+is_real = src.startswith(("yahoo", "csv"))
+badge = "🟢 real market data" if is_real else "🟡 synthetic"
+window = f" · {str(ds.get('as_of_start',''))[:4]}–{str(ds.get('as_of_end',''))[:4]}" if is_real else ""
+st.sidebar.caption(f"Data: **{badge}**{window}")
 st.sidebar.caption(f"Model v{meta['model_version']} · {meta['shrinkage_target'].split('(')[0].strip()} "
                    f"shrinkage δ={meta['shrinkage_intensity']:.2f}")
 st.sidebar.caption(f"Regime: {rg['n_crisis_weeks']}/{rg['n_weeks']} crisis weeks detected, "
