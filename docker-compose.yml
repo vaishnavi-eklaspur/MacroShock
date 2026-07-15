@@ -18,8 +18,12 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       MACROSHOCK_DB: /app/data/macroshock.db
+      # Uncomment to require an API key on write endpoints:
+      # MACROSHOCK_API_KEY: ${MACROSHOCK_API_KEY:-}
     ports:
       - "5000:5000"
+    volumes:
+      - macroshock-data:/app/data      # saved portfolios survive restarts
     depends_on:
       redis:
         condition: service_healthy
@@ -32,3 +36,6 @@ services:
       - "8501:8501"
     depends_on:
       - api
+
+volumes:
+  macroshock-data:

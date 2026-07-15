@@ -23,9 +23,15 @@ institutional-grade capabilities and — importantly — is built to survive scr
    paths by plausibility.
 3. **Fat-tailed risk.** Gaussian VaR shown next to Historical, Cornish–Fisher (skew/kurtosis)
    and Student-t VaR/CVaR — because a stress tool that assumes normality is a contradiction.
-4. **Backtest vs. reality.** The factor-shock engine's predictions are compared against
-   **independent, documented** 2008/2020 crisis returns (MAE/RMSE), not against itself.
+4. **Backtest vs. reality.** Leave-one-crisis-out out-of-sample test across **five**
+   independent, documented crises (dot-com, GFC, Euro 2011, COVID, 2022) with a **skill score**
+   against naive benchmarks — not scored against itself.
 5. **Auto-generated investment commentary.** Deterministic, auditable PM-style narrative.
+6. **Real or synthetic data, one flag.** `python -m data.seed --source yahoo` pulls live prices
+   (factor histories derived by projection onto the exposure matrix); offline it degrades
+   gracefully to reproducible synthetic data, and `/api/meta` always reports which is live.
+7. **Interactive dashboard.** Build custom shock scenarios, compare two portfolios side by side,
+   save/load named portfolios (persisted server-side), and export a CSV/HTML consulting report.
 
 Under the hood: a **6-factor** model (Equity, Rates, Credit, Commodity, **Liquidity, FX**),
 **persistent (Markov) regime-switching** fat-tailed data, **constant-correlation Ledoit–Wolf**
@@ -77,13 +83,27 @@ Then open the dashboard at <http://localhost:8501>. The API is at <http://localh
 ```bash
 cd backend
 pip install -r requirements.txt
-python -m data.seed            # build the SQLite database
+python -m data.seed            # build the SQLite database (synthetic, reproducible)
 flask --app app run            # API on :5000  (Redis optional; degrades gracefully)
 
 cd ../frontend
 pip install -r requirements.txt
 streamlit run streamlit_app.py # dashboard on :8501
 ```
+
+### Use real market data
+
+```bash
+pip install yfinance
+python -m data.seed --source yahoo --start 2012-01-01   # live prices; falls back offline
+# or bring your own weekly-returns CSV (date,SPY,IEF,…):
+python -m data.seed --source csv --csv my_returns.csv
+```
+
+### Lock it down (optional)
+
+Set `MACROSHOCK_API_KEY` to require an `X-API-Key` header on write endpoints; the dashboard
+reads the same variable. `MACROSHOCK_RATE_PER_MIN` caps write requests per IP per minute.
 
 ### Verify the math (no heavy dependencies)
 
@@ -103,18 +123,22 @@ cd backend && pytest
 
 ---
 
-## Asset universe
+## Asset universe (13)
 
-| Ticker | Name | Class |
-|---|---|---|
-| SPY | S&P 500 ETF | Equity |
-| IEF | 7–10y US Treasury ETF | Fixed Income (rates) |
-| LQD | Investment-grade corporate bond ETF | Fixed Income (credit) |
-| GLD | Gold | Commodity / safe haven |
-| DBC | Broad commodity index | Commodity |
+| Class | Tickers |
+|---|---|
+| Equity | SPY (US large), QQQ (growth), IWM (small), EFA (intl dev), EEM (EM) |
+| Rates | IEF (7–10y UST), TLT (20y+ UST), TIP (TIPS) |
+| Credit | LQD (IG), HYG (high yield) |
+| Real assets | GLD (gold), DBC (commodities), VNQ (REITs) |
 
-## Scenarios
+Each asset carries documented factor sensitivities (equity/commodity/liquidity/FX betas,
+effective & spread durations, convexity) — see [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md).
 
-- **2008 GFC (acute)** · **2020 Liquidity Freeze** · **Synthetic 2026 Inflation Spike**
+## Scenarios (8)
 
-Magnitudes are calibrated to documented crisis moves; see the methodology doc.
+Historical: **2000 dot-com**, **2008 GFC**, **2011 Euro crisis**, **2013 taper**,
+**2020 COVID freeze**, **2022 rate shock**. Synthetic: **2026 inflation spike**,
+**stagflation**. Magnitudes are calibrated to documented crisis moves.
+
+You can also **build any scenario interactively** in the dashboard's *Scenario builder* tab.

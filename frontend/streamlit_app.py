@@ -18,7 +18,12 @@ import requests
 import streamlit as st
 
 API_BASE = os.getenv("API_BASE", "http://localhost:5000")
+API_KEY = os.getenv("MACROSHOCK_API_KEY")
 st.set_page_config(page_title="MacroShock", page_icon="⚡", layout="wide")
+
+
+def _headers() -> dict:
+    return {"X-API-Key": API_KEY} if API_KEY else {}
 
 
 @st.cache_data(ttl=60)
@@ -29,7 +34,14 @@ def api_get(path: str) -> dict:
 
 
 def api_post(path: str, payload: dict) -> dict:
-    r = requests.post(f"{API_BASE}{path}", json=payload, timeout=30)
+    r = requests.post(f"{API_BASE}{path}", json=payload, timeout=30, headers=_headers())
+    if r.status_code >= 400:
+        raise RuntimeError(r.json().get("error", r.text))
+    return r.json()
+
+
+def api_delete(path: str) -> dict:
+    r = requests.delete(f"{API_BASE}{path}", timeout=30, headers=_headers())
     if r.status_code >= 400:
         raise RuntimeError(r.json().get("error", r.text))
     return r.json()
@@ -94,28 +106,38 @@ if total == 0:
 weights = {t: v / total for t, v in raw.items()}
 st.sidebar.metric("Total allocation", f"{total}%", help="Weights are normalized to 100%.")
 
-# --- save / load / export named portfolios ------------------------------------------
-with st.sidebar.expander("Save / load portfolios"):
-    saved = st.session_state.setdefault("_saved", {})
+# --- save / load named portfolios (persisted server-side) ---------------------------
+def server_portfolios() -> dict:
+    try:
+        return {p["name"]: p["weights"] for p in api_get("/api/portfolios")["portfolios"]}
+    except Exception:
+        return {}
+
+
+with st.sidebar.expander("Save / load portfolios (server)"):
     name = st.text_input("Name", placeholder="e.g. Client A")
-    if st.button("Save current", use_container_width=True) and name:
-        saved[name] = dict(raw)
-        st.success(f"Saved '{name}'.")
+    if st.button("Save to server", use_container_width=True) and name:
+        try:
+            api_post("/api/portfolios", {"name": name, "weights": weights})
+            api_get.clear()
+            st.success(f"Saved '{name}'.")
+        except Exception as exc:
+            st.error(str(exc))
+    saved = server_portfolios()
     if saved:
-        pick = st.selectbox("Load saved", ["-"] + list(saved))
-        if pick != "-" and st.button("Load selected", use_container_width=True):
-            st.session_state["_pending_weights"] = saved[pick]
+        pick = st.selectbox("Saved portfolios", ["-"] + list(saved))
+        cL, cD = st.columns(2)
+        if pick != "-" and cL.button("Load", use_container_width=True):
+            st.session_state["_pending_weights"] = {t: saved[pick].get(t, 0) * 100 for t in tickers}
             st.rerun()
+        if pick != "-" and cD.button("Delete", use_container_width=True):
+            try:
+                api_delete(f"/api/portfolios/{pick}"); api_get.clear(); st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
         st.download_button("Export all (JSON)", json.dumps(saved, indent=2),
                            "macroshock_portfolios.json", "application/json",
                            use_container_width=True)
-    up = st.file_uploader("Import JSON", type="json")
-    if up is not None:
-        try:
-            saved.update(json.load(up))
-            st.success(f"Imported {len(saved)} portfolio(s).")
-        except Exception as exc:
-            st.error(f"Bad JSON: {exc}")
 
 st.sidebar.header("Scenario")
 scenario_labels = {s["scenario_id"]: s["name"] for s in scenarios}
@@ -316,7 +338,7 @@ with tab_compare:
     st.caption(f"Portfolio **A** = your current sidebar allocation. Pick **B** below; both are "
                f"stressed under **{scenario_labels[scenario_id]}**.")
     options = {f"Preset · {k}": v for k, v in PRESETS.items()}
-    options.update({f"Saved · {k}": v for k, v in st.session_state.get("_saved", {}).items()})
+    options.update({f"Saved · {k}": v for k, v in server_portfolios().items()})
     b_label = st.selectbox("Portfolio B", list(options))
     wB = weights_from_pct(options[b_label])
     try:

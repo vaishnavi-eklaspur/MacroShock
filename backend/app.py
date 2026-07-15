@@ -17,14 +17,24 @@ POST /api/portfolio/custom-stress-test   same, against a user-defined factor-sho
 POST /api/portfolio/reverse-stress-test  constrained most-plausible shock + top-k narratives
 POST /api/portfolio/rebalance            mitigation trade only
 GET  /api/backtest                       model-predicted vs realized crisis returns
+GET  /api/portfolios                     list server-saved portfolios
+POST /api/portfolios                     save/upsert a named portfolio
+DELETE /api/portfolios/<name>            delete a saved portfolio
+
+Auth: set MACROSHOCK_API_KEY to require an X-API-Key header on POST/DELETE (unset = open,
+for local demos). A lightweight in-process rate limiter caps POST/DELETE per IP per minute.
 """
 from __future__ import annotations
 
 import logging
+import os
 import time
+from collections import defaultdict
 
 from flask import Flask, jsonify, request
 from pydantic import ValidationError
+
+from data import database
 
 from analytics import factors as factors_mod
 from analytics import rebalance as rebalance_mod
@@ -46,6 +56,25 @@ def create_app() -> Flask:
     app = Flask(__name__)
     engine = MacroShockEngine()
     cache = Cache()
+
+    api_key = os.getenv("MACROSHOCK_API_KEY")            # unset => open (local demo)
+    rate_per_min = int(os.getenv("MACROSHOCK_RATE_PER_MIN", "120"))
+    hits: dict[str, list[float]] = defaultdict(list)
+
+    @app.before_request
+    def _guard():
+        # Optional API-key auth on mutating/compute endpoints; GET/health stay open.
+        if api_key and request.method in ("POST", "DELETE"):
+            if request.headers.get("X-API-Key") != api_key:
+                return jsonify({"error": "Unauthorized: missing or invalid X-API-Key."}), 401
+        # ponytail: in-process fixed-window limiter; front with nginx/Redis for multi-worker.
+        if request.method in ("POST", "DELETE"):
+            ip = request.remote_addr or "?"
+            now = time.time()
+            recent = hits[ip] = [t for t in hits[ip] if now - t < 60]
+            if len(recent) >= rate_per_min:
+                return jsonify({"error": "Rate limit exceeded; slow down."}), 429
+            recent.append(now)
 
     def check_tickers(weights: dict[str, float]) -> None:
         unknown = set(weights) - set(engine.tickers)
@@ -172,6 +201,28 @@ def create_app() -> Flask:
         asset_scn = factors_mod.scenario_asset_returns(engine.assets, shocks)
         rec = rebalance_mod.optimize_rebalance(w, engine.tickers, asset_scn, engine.stressed_cov)
         return jsonify(_optimized_rebalance_dict(rec))
+
+    # ---------------------------------------------------------------- saved portfolios
+    @app.get("/api/portfolios")
+    def list_portfolios():
+        return jsonify({"portfolios": database.list_portfolios(engine.db_path)})
+
+    @app.post("/api/portfolios")
+    def save_portfolio():
+        body = request.get_json(force=True) or {}
+        req = WeightsRequest(weights=body.get("weights", {}))
+        check_tickers(req.weights)
+        name = str(body.get("name", "")).strip()
+        if not name:
+            raise ValueError("A non-empty 'name' is required.")
+        database.save_portfolio(name, req.weights, engine.db_path)
+        return jsonify({"saved": name}), 201
+
+    @app.delete("/api/portfolios/<name>")
+    def delete_portfolio(name: str):
+        if not database.delete_portfolio(name, engine.db_path):
+            raise KeyError(f"No saved portfolio named '{name}'")
+        return jsonify({"deleted": name})
 
     return app
 

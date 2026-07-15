@@ -18,6 +18,13 @@ CREATE TABLE IF NOT EXISTS assets (
     display_order   INTEGER NOT NULL DEFAULT 0
 );
 
+-- User data: named portfolios persisted server-side (survive reseeds and UI sessions).
+CREATE TABLE IF NOT EXISTS saved_portfolios (
+    name         TEXT PRIMARY KEY,
+    weights_json TEXT NOT NULL,   -- JSON {ticker: weight}
+    updated_at   TEXT NOT NULL
+);
+
 -- Provenance: how the return history in this database was built (source + window).
 CREATE TABLE IF NOT EXISTS dataset_meta (
     key   TEXT PRIMARY KEY,

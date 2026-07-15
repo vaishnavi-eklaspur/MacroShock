@@ -6,6 +6,9 @@ storage and computation.
 """
 from __future__ import annotations
 
+import datetime as _dt
+import json as _json
+
 import pandas as pd
 
 from . import snowflake_mock
@@ -91,6 +94,38 @@ def get_scenario(scenario_id: str, db_path: str | None = None) -> dict | None:
         if s["scenario_id"] == scenario_id:
             return s
     return None
+
+
+def save_portfolio(name: str, weights: dict[str, float], db_path: str | None = None) -> None:
+    """Upsert a named portfolio (server-side persistence)."""
+    now = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+    with _conn(db_path) as c:
+        c.cursor().execute(
+            "INSERT INTO saved_portfolios (name, weights_json, updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(name) DO UPDATE SET weights_json=excluded.weights_json, "
+            "updated_at=excluded.updated_at",
+            (name, _json.dumps(weights), now),
+        )
+
+
+def list_portfolios(db_path: str | None = None) -> list[dict]:
+    """All saved portfolios, newest first."""
+    with _conn(db_path) as c:
+        try:
+            rows = c.cursor().execute(
+                "SELECT name, weights_json, updated_at FROM saved_portfolios "
+                "ORDER BY updated_at DESC").fetchall()
+        except Exception:
+            return []
+    return [{"name": n, "weights": _json.loads(w), "updated_at": u} for n, w, u in rows]
+
+
+def delete_portfolio(name: str, db_path: str | None = None) -> bool:
+    """Delete a saved portfolio; returns True if a row was removed."""
+    with _conn(db_path) as c:
+        cur = c.cursor()
+        cur.execute("DELETE FROM saved_portfolios WHERE name = ?", (name,))
+        return cur._cur.rowcount > 0  # noqa: SLF001 - mock cursor wraps sqlite3
 
 
 def get_dataset_meta(db_path: str | None = None) -> dict[str, str]:
