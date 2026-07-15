@@ -70,3 +70,17 @@ def test_constant_correlation_shrinkage_valid():
     assert 0.0 <= delta <= 1.0
     assert np.allclose(cov, cov.T)
     assert np.all(np.linalg.eigvalsh(cov) > -1e-8)
+
+
+def test_shrinkage_handles_zero_variance_column():
+    # Real data can contain a flat/degenerate series (e.g. the Liquidity factor with no free
+    # proxy). The estimator must return a finite, symmetric, invertible matrix, not NaN/inf.
+    rng = np.random.default_rng(9)
+    X = rng.standard_normal((150, 4)) * 0.02
+    X = np.column_stack([X, np.zeros(150)])          # 5th column: zero variance
+    with np.errstate(all="raise"):                    # any div-by-zero would raise here
+        cov, delta = pf.ledoit_wolf_constant_correlation(X)
+    assert np.all(np.isfinite(cov))                   # no NaN/inf
+    assert np.allclose(cov, cov.T)
+    assert np.linalg.matrix_rank(cov) == 5            # non-singular (invertible)
+    assert cov[4, 4] > 0                               # degenerate col floored, not exactly 0

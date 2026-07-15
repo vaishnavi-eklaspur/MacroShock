@@ -173,15 +173,26 @@ def ledoit_wolf_constant_correlation(returns: np.ndarray) -> tuple[np.ndarray, f
     Xc = X - X.mean(axis=0)
     S = (Xc.T @ Xc) / T
     var = np.diag(S).copy()
-    std = np.sqrt(var)
+
+    # Guard degenerate (zero-variance) series - e.g. a factor with no free proxy, or a ticker
+    # that didn't trade over the window. Without this, real data with a flat column makes the
+    # correlation and rho terms divide by zero -> NaN covariance. Floor their variance so the
+    # result stays finite and non-singular, and treat them as uncorrelated (they carry no info).
+    eps = 1e-12
+    degenerate = var <= eps
+    var_floored = np.where(degenerate, eps, var)
+    std = np.sqrt(var_floored)
     outer_std = np.outer(std, std)
     corr = S / outer_std
+    corr[degenerate, :] = 0.0
+    corr[:, degenerate] = 0.0
+    np.fill_diagonal(corr, 1.0)
     # average off-diagonal correlation
     r_bar = (corr.sum() - n) / (n * (n - 1)) if n > 1 else 0.0
 
     # constant-correlation target
     F = r_bar * outer_std
-    np.fill_diagonal(F, var)
+    np.fill_diagonal(F, var_floored)
 
     # pi: asymptotic variances of sample covariance entries
     pi_mat = np.zeros((n, n))
@@ -195,7 +206,7 @@ def ledoit_wolf_constant_correlation(returns: np.ndarray) -> tuple[np.ndarray, f
     rho_off = 0.0
     for i in range(n):
         for j in range(n):
-            if i == j:
+            if i == j or degenerate[i] or degenerate[j]:
                 continue
             theta_ii = np.mean((Xc[:, i] ** 2 - S[i, i]) * (Xc[:, i] * Xc[:, j] - S[i, j]))
             theta_jj = np.mean((Xc[:, j] ** 2 - S[j, j]) * (Xc[:, i] * Xc[:, j] - S[i, j]))
