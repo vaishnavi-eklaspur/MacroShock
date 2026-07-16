@@ -73,7 +73,7 @@ Streamlit dashboard┘        (pydantic,        │
 | UI | **Streamlit** dashboard + **React/TypeScript** client (`frontend-react/`) | two independent front-ends over one typed API |
 | API | **Flask** + pydantic | validated, Redis-cached, API-key + rate-limited, `/metrics` |
 | Analytics | **Python / numpy / scipy** | pure, tested functions ([`docs/METHODOLOGY.md`](docs/METHODOLOGY.md)) |
-| Data | **SQL** (SQLite mock **or** real **Snowflake** adapter) | warehouse dispatcher swaps mock↔Snowflake by env var |
+| Data | **SQL** — SQLite via a mock **Snowflake** connector | mirrors the real connector API (`cursor.execute`, `fetch_pandas_all`); swap for `snowflake-connector-python` in prod |
 | Deploy | **Docker Compose**, **Render** (`render.yaml`), **Azure** (`deploy/azure/`) | one command locally; two clicks to the cloud |
 
 ## Run it

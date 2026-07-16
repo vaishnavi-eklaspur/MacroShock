@@ -36,8 +36,9 @@ proposes a *constrained* mitigation trade — behind a typed API, two UIs, and D
   impact) — confirmed by the in-sample check (MAE ~5%) and the attribution outputs.
 - **Data ships synthetic** (reproducible, two-regime, fat-tailed) and is **one flag from real**
   (`--source yahoo`), with the source reported at `/api/meta`.
-- **"Snowflake" is a SQLite mock** with a real, import-guarded Snowflake adapter behind it
-  (`snowflake_real.py`); I know the dialect differs (PRAGMA, `MERGE` vs upsert) and say so.
+- **"Snowflake" is a SQLite mock** (`snowflake_mock.py`) that mirrors the real connector's API
+  (`cursor.execute`, `fetch_pandas_all`); production would swap it for `snowflake-connector-python`.
+  I know the dialect differs (PRAGMA, `MERGE` vs upsert) and say so rather than pretend it's live.
 
 ## Real-data validation (I checked, not just "it returns 200")
 Seeded on live Yahoo data (`--source yahoo`, 2015–present), the OLS-estimated betas recover
@@ -59,7 +60,7 @@ multicollinearity artifacts — disclosed via the reported VIF and condition num
 VIX-based proxy; a licensed feed (Bloomberg OAS, a funding/TED series) is the production fix.
 
 ## Architecture & the "how"
-Layered and decoupled: `data` (repository + warehouse dispatcher) → `analytics` (pure, tested
+Layered and decoupled: `data` (repository over a mock-Snowflake connector) → `analytics` (pure, tested
 functions) → `engine` (orchestration) → `api` (Flask, pydantic-validated, Redis-cached, rate-
 limited, `/metrics`) → UI (**Streamlit** for the analyst dashboard, **React+TypeScript** for the
 typed client). Model-versioned cache keys guarantee a model change can never serve a stale number.
