@@ -251,7 +251,7 @@ def render_stress(result: dict, weights: dict, confidence: float, key_prefix: st
         fdf = pd.DataFrame({"Factor": list(fp.keys()), "P&L %": [v * 100 for v in fp.values()]})
         fig = px.bar(fdf, x="Factor", y="P&L %", color="P&L %", color_continuous_scale="RdYlGn")
         fig.update_layout(showlegend=False, coloraxis_showscale=False, height=360)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_factorpnl")
     with right:
         st.subheader("Risk share: calm vs. crisis regime")
         rc = result["risk_contribution"]
@@ -261,7 +261,7 @@ def render_stress(result: dict, weights: dict, confidence: float, key_prefix: st
         fig2.add_bar(name="Risk % (calm)", x=held, y=[rc["calm_percentage"][t] * 100 for t in held])
         fig2.add_bar(name="Risk % (crisis)", x=held, y=[rc["stressed_percentage"][t] * 100 for t in held])
         fig2.update_layout(barmode="group", height=360)
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, use_container_width=True, key=f"{key_prefix}_riskshare")
 
     st.subheader("Tail check: VaR under different distributional assumptions")
     var = riskd["var"]
@@ -274,7 +274,7 @@ def render_stress(result: dict, weights: dict, confidence: float, key_prefix: st
     })
     figv = px.bar(vardf, x="Method", y=f"1-week VaR ({confidence:.0%})", color="Method")
     figv.update_layout(showlegend=False, height=320)
-    st.plotly_chart(figv, use_container_width=True)
+    st.plotly_chart(figv, use_container_width=True, key=f"{key_prefix}_var")
 
     cvar = riskd.get("cvar", {})
     cv1, cv2 = st.columns(2)
@@ -300,7 +300,7 @@ def render_stress(result: dict, weights: dict, confidence: float, key_prefix: st
         "P&L contribution": [f"{pnl[t]*100:.2f}%" for t in held],
         "Risk % (crisis)": [f"{rc['stressed_percentage'][t]*100:.1f}%" for t in held],
     })
-    st.dataframe(holdings, use_container_width=True, hide_index=True)
+    st.dataframe(holdings, use_container_width=True, hide_index=True, key=f"{key_prefix}_holdings")
 
     reb = result["rebalance"]
     st.subheader("🔧 Recommended mitigation (constrained optimization)")
@@ -314,7 +314,7 @@ def render_stress(result: dict, weights: dict, confidence: float, key_prefix: st
             "Ticker": held,
             "Current": [f"{reb['old_weights'][t]*100:.1f}%" for t in held],
             "Optimized": [f"{reb['new_weights'][t]*100:.1f}%" for t in held],
-        }), use_container_width=True, hide_index=True)
+        }), use_container_width=True, hide_index=True, key=f"{key_prefix}_rebal")
     else:
         st.write("The constrained optimizer finds no turnover-limited trade that reduces crisis "
                  "risk without worsening the scenario — the allocation is already efficient here.")
@@ -412,7 +412,7 @@ with tab_compare:
                 y=[rB["portfolio_drawdown"] * 100, rB["risk"]["var"]["historical"] * 100,
                    rB["risk"]["volatility_annual"] * 100])
     fig.update_layout(barmode="group", height=380, yaxis_title="%")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key="cmp_ab")
     dd = (rB["portfolio_drawdown"] - rA["portfolio_drawdown"]) * 100
     st.info(f"Under {scenario_labels[scenario_id]}, **B draws down {abs(dd):.1f}pp "
             f"{'less' if dd > 0 else 'more'}** than A.")
@@ -450,7 +450,7 @@ with tab_bench:
         figt = px.bar(tdf, x="Factor", y="Active exposure", color="Active exposure",
                       color_continuous_scale="RdBu")
         figt.update_layout(showlegend=False, coloraxis_showscale=False, height=340)
-        st.plotly_chart(figt, use_container_width=True)
+        st.plotly_chart(figt, use_container_width=True, key="bench_tilts")
     with right:
         st.markdown("**Active weights vs benchmark**")
         aw = pd.DataFrame({
@@ -541,7 +541,7 @@ with tab_backtest:
         figov.add_bar(name="Skill vs predict-zero", x=ov["Crisis"], y=ov["vs predict-zero"])
         figov.add_bar(name="Skill vs repeat-last", x=ov["Crisis"], y=ov["vs repeat-last"])
         figov.update_layout(barmode="group", height=340, yaxis_title="Skill % (higher = better)")
-        st.plotly_chart(figov, use_container_width=True)
+        st.plotly_chart(figov, use_container_width=True, key="bt_overview")
 
         # Interactive: pick a crisis fold to drill into.
         choice = st.selectbox("🔎 Inspect a crisis fold", list(folds))
@@ -564,7 +564,7 @@ with tab_backtest:
             fig.add_bar(name="Model prediction", x=pa["ticker"], y=pa["model"] * 100)
             fig.add_bar(name="Realized", x=pa["ticker"], y=pa["realized"] * 100)
             fig.update_layout(barmode="group", height=400, yaxis_title="Crisis-window return %")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="bt_percrisis")
 
     with st.expander("In-sample calibration check (not a skill test)"):
         st.caption(bt["in_sample"]["note"])
