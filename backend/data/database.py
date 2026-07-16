@@ -1,4 +1,4 @@
-"""Repository layer: parameterized SQL over the (mock Snowflake) warehouse.
+"""Repository layer: parameterized SQL over the SQLite store (a mock Snowflake connector).
 
 Every read the analytics/API layers need goes through here, returning pandas DataFrames
 or plain dicts. This is the only module that knows SQL, keeping a clean separation between
