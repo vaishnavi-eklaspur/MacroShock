@@ -10,7 +10,7 @@ an institutional risk desk, in a small, tested, deployable stack.
 ![coverage](https://img.shields.io/badge/coverage-79%25-brightgreen)
 ![tests](https://img.shields.io/badge/tests-52%20passing-brightgreen)
 
-**Live demo:** dashboard → `https://YOUR-APP.streamlit.app` · API → <https://macroshock-api.onrender.com/health>
+**▶ Live demo: [macroshock.streamlit.app](https://macroshock.streamlit.app)** · API health → [macroshock-api.onrender.com/health](https://macroshock-api.onrender.com/health)
 
 > Educational demonstration on real market data — **not** investment advice, **not** a
 > regulatory-grade system. Its limits are stated explicitly below and in
