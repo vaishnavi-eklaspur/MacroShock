@@ -27,11 +27,6 @@ def covariance_matrix(returns: np.ndarray) -> np.ndarray:
     return np.cov(returns, rowvar=False, ddof=1)
 
 
-def portfolio_return(weights: np.ndarray, asset_returns: np.ndarray) -> float:
-    """Single-period portfolio return R_p = wᵀr."""
-    return float(np.dot(normalize_weights(weights), np.asarray(asset_returns, dtype=float)))
-
-
 def portfolio_volatility(weights: np.ndarray, cov: np.ndarray) -> float:
     """Portfolio volatility sigma_p = sqrt(wᵀ Σ w) (periodic)."""
     w = normalize_weights(weights)

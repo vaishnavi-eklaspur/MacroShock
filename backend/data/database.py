@@ -90,13 +90,6 @@ def get_scenarios(db_path: str | None = None) -> list[dict]:
     return out
 
 
-def get_scenario(scenario_id: str, db_path: str | None = None) -> dict | None:
-    for s in get_scenarios(db_path):
-        if s["scenario_id"] == scenario_id:
-            return s
-    return None
-
-
 def save_portfolio(name: str, weights: dict[str, float], db_path: str | None = None) -> None:
     """Upsert a named portfolio (server-side persistence)."""
     now = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")

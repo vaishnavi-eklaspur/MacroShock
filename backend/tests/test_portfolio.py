@@ -5,12 +5,6 @@ from scipy.stats import norm
 from analytics import portfolio as pf
 
 
-def test_portfolio_return_is_weighted_sum():
-    w = np.array([0.5, 0.5])
-    r = np.array([0.10, -0.02])
-    assert pf.portfolio_return(w, r) == pytest.approx(0.04)
-
-
 def test_normalize_weights_sums_to_one():
     w = pf.normalize_weights(np.array([40.0, 20.0, 20.0, 10.0, 10.0]))
     assert w.sum() == pytest.approx(1.0)

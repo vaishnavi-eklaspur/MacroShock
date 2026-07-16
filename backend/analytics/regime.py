@@ -51,8 +51,7 @@ def crisis_mask(returns: np.ndarray, p: float = 0.99,
     return d2 >= np.quantile(d2, 1.0 - min_fraction)  # last-resort floor
 
 
-def conditional_covariance(returns: np.ndarray, mask: np.ndarray,
-                           shrink: bool = True) -> tuple[np.ndarray, bool]:
+def conditional_covariance(returns: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, bool]:
     """Covariance on crisis weeks. Returns (cov, used_fallback).
 
     Uses constant-correlation Ledoit-Wolf shrinkage (crisis subsample is small). If there
@@ -64,10 +63,7 @@ def conditional_covariance(returns: np.ndarray, mask: np.ndarray,
     used_fallback = False
     if sub.shape[0] < sub.shape[1] + 2:
         sub, used_fallback = X, True
-    if shrink:
-        cov, _ = ledoit_wolf_constant_correlation(sub)
-    else:
-        cov = np.cov(sub, rowvar=False, ddof=1)
+    cov, _ = ledoit_wolf_constant_correlation(sub)
     return cov, used_fallback
 
 
