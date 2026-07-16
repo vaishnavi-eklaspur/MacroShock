@@ -1,4 +1,7 @@
-streamlit==1.36.0
-plotly==5.22.0
-pandas==2.2.2
-requests==2.32.3
+# Ranges (not exact pins) so the resolver can pick wheels for whatever Python the host uses —
+# Streamlit Community Cloud forces Python 3.14, where older pinned pillow/pandas have no wheels
+# and fail to compile. Newer Streamlit (>=1.40) allows a pillow with 3.14 wheels.
+streamlit>=1.40,<2
+plotly>=5.22
+pandas>=2.2,<3
+requests>=2.31
