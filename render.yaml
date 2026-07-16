@@ -22,6 +22,10 @@ services:
         value: data/real_factor_returns.csv
       - key: CORS_ORIGINS
         value: "*"
+      # REQUIRED secret — set the value in the Render dashboard (not committed). Gates
+      # portfolio persistence (write/delete); without it those endpoints are disabled.
+      - key: MACROSHOCK_API_KEY
+        sync: false
 
   - type: web
     name: macroshock-dashboard
@@ -34,3 +38,6 @@ services:
         # If Render appends a suffix to the API's URL, update this in the dashboard's
         # Environment settings after the first deploy.
         value: https://macroshock-api.onrender.com
+      # Same key as the API, so the dashboard can authenticate its save/load calls.
+      - key: MACROSHOCK_API_KEY
+        sync: false

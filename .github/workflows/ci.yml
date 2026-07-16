@@ -19,11 +19,14 @@ jobs:
 
   backend-tests:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]   # 3.11 = the Docker/deploy runtime; 3.12 guards drift
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         working-directory: backend
         run: |
@@ -38,6 +41,20 @@ jobs:
       - name: Run tests
         working-directory: backend
         run: pytest -q
+
+  frontend-react:
+    # The React/TS client had no CI - a type error could land on main unnoticed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install and type-check + build (tsc runs in the build script)
+        working-directory: frontend-react
+        run: |
+          npm ci
+          npm run build
 
   docker-smoke:
     # Builds and boots the FULL stack and checks it actually serves - catches things unit

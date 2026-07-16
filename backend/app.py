@@ -22,11 +22,14 @@ GET  /api/portfolios                     list server-saved portfolios
 POST /api/portfolios                     save/upsert a named portfolio
 DELETE /api/portfolios/<name>            delete a saved portfolio
 
-Auth: set MACROSHOCK_API_KEY to require an X-API-Key header on POST/DELETE (unset = open,
-for local demos). A lightweight in-process rate limiter caps POST/DELETE per IP per minute.
+Auth: portfolio persistence (POST/DELETE /api/portfolios) always requires an X-API-Key equal
+to MACROSHOCK_API_KEY, and is DISABLED (fail-closed) when no key is set, so a public instance
+can't be written to. Stateless compute endpoints stay open unless a key is configured. A
+Redis-backed (per-IP, via ProxyFix) rate limiter caps writes per minute.
 """
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 import time
@@ -35,6 +38,7 @@ from collections import defaultdict
 from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from pydantic import ValidationError
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from data import database
 
@@ -57,27 +61,40 @@ logger = logging.getLogger("macroshock.api")
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    # Trust one layer of reverse proxy (Render/Azure) so request.remote_addr is the real client
+    # IP from X-Forwarded-For, not the proxy — otherwise the per-IP rate limiter collapses into a
+    # single global counter behind the proxy.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
     # CORS so a browser-hosted client (the React app on another origin) can call the API.
-    # Restrict to CORS_ORIGINS (comma-separated) in prod; '*' is fine for a read API with no
-    # cookies (writes are guarded by the API key, not the browser origin).
+    # '*' is fine for the read/compute API (no cookies); persistence writes are key-gated below.
     CORS(app, resources={r"/api/*": {"origins": os.getenv("CORS_ORIGINS", "*").split(",")},
                          r"/health": {"origins": "*"}})
     engine = MacroShockEngine()
     cache = Cache()
 
-    api_key = os.getenv("MACROSHOCK_API_KEY")            # unset => open (local demo)
+    api_key = os.getenv("MACROSHOCK_API_KEY")
     rate_per_min = int(os.getenv("MACROSHOCK_RATE_PER_MIN", "120"))
     hits: dict[str, list[float]] = defaultdict(list)
     metrics: dict[str, int] = defaultdict(int)           # {(path,status): count}
+    if not api_key:
+        logger.warning("MACROSHOCK_API_KEY not set: portfolio persistence (write/delete) is "
+                       "DISABLED. Set it (and match it in the dashboard) to enable saving.")
+
+    def _authed() -> bool:
+        return bool(api_key) and hmac.compare_digest(request.headers.get("X-API-Key", "") or "", api_key)
 
     @app.before_request
     def _guard():
         g.t0 = time.perf_counter()
-        # Optional API-key auth on mutating/compute endpoints; GET/health stay open.
-        if api_key and request.method in ("POST", "DELETE"):
-            if request.headers.get("X-API-Key") != api_key:
-                return jsonify({"error": "Unauthorized: missing or invalid X-API-Key."}), 401
-        if request.method in ("POST", "DELETE"):
+        write = request.method in ("POST", "DELETE")
+        # Only PERSISTENCE mutates shared server state -> require auth (fail-closed): disabled when
+        # no key is set, so a public instance can't be written to. Stateless compute endpoints stay
+        # open (the public demo needs them) and are protected by rate limiting alone.
+        if write and request.path.startswith("/api/portfolios") and not _authed():
+            if not api_key:
+                return jsonify({"error": "Portfolio persistence is disabled on this deployment."}), 403
+            return jsonify({"error": "Unauthorized: missing or invalid X-API-Key."}), 401
+        if write:
             ip = request.remote_addr or "?"
             allowed = cache.rate_hit(ip, rate_per_min)   # Redis-backed, shared across workers
             if allowed is None:                          # Redis down: in-process fallback
@@ -287,6 +304,8 @@ def create_app() -> Flask:
         name = str(body.get("name", "")).strip()
         if not name:
             raise ValueError("A non-empty 'name' is required.")
+        if len(name) > 100:
+            raise ValueError("'name' must be at most 100 characters.")
         database.save_portfolio(name, req.weights, engine.db_path)
         return jsonify({"saved": name}), 201
 
