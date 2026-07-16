@@ -38,9 +38,9 @@ jobs:
       - name: Seed database
         working-directory: backend
         run: python -m data.seed
-      - name: Run tests
+      - name: Run tests with coverage
         working-directory: backend
-        run: pytest -q
+        run: pytest -q --cov=analytics --cov=data --cov=app --cov-report=term-missing --cov-fail-under=75
 
   frontend-react:
     # The React/TS client had no CI - a type error could land on main unnoticed.

@@ -7,6 +7,8 @@ active risk, factor tilts), and proposes a *constrained* mitigation trade — th
 an institutional risk desk, in a small, tested, deployable stack.
 
 [![CI](https://github.com/vaishnavi-eklaspur/MacroShock/actions/workflows/ci.yml/badge.svg)](https://github.com/vaishnavi-eklaspur/MacroShock/actions/workflows/ci.yml)
+![coverage](https://img.shields.io/badge/coverage-79%25-brightgreen)
+![tests](https://img.shields.io/badge/tests-52%20passing-brightgreen)
 
 **Live demo:** dashboard → `https://YOUR-APP.streamlit.app` · API → <https://macroshock-api.onrender.com/health>
 
@@ -32,6 +34,22 @@ Mean R² ≈ **0.79** on real weekly data — deliberately *not* ~1.0. The facto
 series (real proxies or a projection-free CSV), so a genuine share of return stays
 idiosyncratic. If the factors were derived from the assets, R² would be ~1.0 and the "factor
 model" would be circular — a trap the code explicitly tests against.
+
+## The backtest — honest, not flattering
+
+The single most telling number, reported plainly rather than buried:
+
+- **In-sample (pricing check):** given each crisis's calibrated factor shocks, the model
+  reproduces realized asset returns to **4–12% MAE**. The conditional-pricing claim holds.
+- **Out-of-sample (leave-one-crisis-out):** betas fit *only* on the weekly history predict a
+  held-out crisis. Across five heterogeneous crises the model shows **negative skill** vs. the
+  naive benchmarks (predict-zero, repeat-last-crisis) — it does **not** forecast the next
+  crisis's shape, and the report says so.
+
+That's the point: forecasting *which* crisis happens isn't the tool's claim; pricing the impact
+*given* a scenario is — and that is what the in-sample check and the risk/attribution outputs
+validate. A model that quietly beat every benchmark out-of-sample on five crises would be the
+thing to distrust.
 
 ## What makes it more than a stock tracker
 
