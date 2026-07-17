@@ -1,0 +1,23 @@
+name: keep-alive
+
+# Pings the live dashboard + API so the free-tier instances don't sleep (no ~50s cold start
+# when a recruiter clicks the link). Runs every 10 minutes; the Render free tier sleeps after
+# 15 min idle, so this keeps a margin. Free on a public repo.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}       # allow manual runs
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake / keep the API awake
+        run: |
+          # generous timeout: the first hit after sleep must wait for the cold start (~50s)
+          curl -sS -m 90 -o /dev/null -w "api    -> %{http_code} in %{time_total}s\n" \
+            https://macroshock-api.onrender.com/health || echo "api ping failed (non-fatal)"
+      - name: Wake / keep the Streamlit dashboard awake
+        run: |
+          curl -sS -m 90 -o /dev/null -w "dash   -> %{http_code} in %{time_total}s\n" \
+            https://macroshock.streamlit.app/ || echo "dashboard ping failed (non-fatal)"
