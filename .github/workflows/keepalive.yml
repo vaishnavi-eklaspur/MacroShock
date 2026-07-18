@@ -1,23 +1,60 @@
 name: keep-alive
 
-# Pings the live dashboard + API so the free-tier instances don't sleep (no ~50s cold start
-# when a recruiter clicks the link). Runs every 10 minutes; the Render free tier sleeps after
-# 15 min idle, so this keeps a margin. Free on a public repo.
+# Keeps the free-tier deployments warm so a recruiter never lands on a sleep screen.
+#
+# Two mechanisms, because the hosts sleep differently:
+#  - Render sleeps after 15 min without HTTP traffic -> plain curl works. (NOTE: GitHub cron
+#    is throttled to ~hourly in practice, so UptimeRobot at 5-min intervals is the primary
+#    keep-alive for Render; this job is a backup.)
+#  - Streamlit Community Cloud counts only real browser sessions (websocket), so curl does
+#    NOT register as a visit. A headless Chromium visit does — and it also clicks the
+#    "get this app back up" button if the app already fell asleep.
 on:
   schedule:
-    - cron: "*/10 * * * *"
-  workflow_dispatch: {}       # allow manual runs
+    - cron: "*/10 * * * *"      # curl pings (Render) — fires ~hourly in practice
+    - cron: "23 */4 * * *"      # real browser visit (Streamlit) — needs to land < its idle window
+  workflow_dispatch: {}
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Wake / keep the API awake
+      - name: Ping the API and Render dashboard (HTTP is enough for Render)
         run: |
-          # generous timeout: the first hit after sleep must wait for the cold start (~50s)
-          curl -sS -m 90 -o /dev/null -w "api    -> %{http_code} in %{time_total}s\n" \
+          curl -sS -m 90 -o /dev/null -w "api  -> %{http_code} in %{time_total}s\n" \
             https://macroshock-api.onrender.com/health || echo "api ping failed (non-fatal)"
-      - name: Wake / keep the Streamlit dashboard awake
+          curl -sS -m 90 -o /dev/null -w "dash -> %{http_code} in %{time_total}s\n" \
+            https://macroshock-dashboard.onrender.com/ || echo "render dash ping failed (non-fatal)"
+
+  browser-visit:
+    # Streamlit needs a real session; run only on the 4-hourly schedule (or manual dispatch).
+    if: github.event.schedule == '23 */4 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Playwright + headless Chromium
         run: |
-          curl -sS -m 90 -o /dev/null -w "dash   -> %{http_code} in %{time_total}s\n" \
-            https://macroshock.streamlit.app/ || echo "dashboard ping failed (non-fatal)"
+          npm init -y >/dev/null
+          npm i playwright@1.49.1 >/dev/null
+          npx playwright install --with-deps chromium
+      - name: Visit the Streamlit app (opens a websocket; wakes it if asleep)
+        run: |
+          cat > visit.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          const browser = await chromium.launch();
+          const page = await browser.newPage();
+          await page.goto('https://macroshock.streamlit.app/', { waitUntil: 'load', timeout: 120000 });
+          // If it fell asleep, click the wake button.
+          const wake = page.getByText(/get this app back up/i);
+          if (await wake.count() > 0) {
+            console.log('App was asleep — clicking wake button.');
+            await wake.first().click();
+          }
+          // Hold the session open so the websocket registers as a real visit.
+          await page.waitForTimeout(90000);
+          console.log('Visit complete:', await page.title());
+          await browser.close();
+          EOF
+          node visit.mjs
