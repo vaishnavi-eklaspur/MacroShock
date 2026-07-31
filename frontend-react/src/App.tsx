@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type Asset, type Scenario, type StressResult } from "./api";
+import AuthorFooter from "./AuthorFooter";
 
 const pct = (x: number) => `${(x * 100).toFixed(2)}%`;
 
@@ -49,6 +50,7 @@ export function App() {
   const maxAbs = Math.max(1e-9, ...factorRows.map(([, v]) => Math.abs(v)));
 
   return (
+    <>
     <main style={{ fontFamily: "system-ui, sans-serif", maxWidth: 900, margin: "2rem auto", padding: "0 1rem" }}>
       <h1>⚡ MacroShock <span style={{ fontWeight: 400, fontSize: 16, color: "#888" }}>· React + TypeScript client</span></h1>
       {error && <p style={{ color: "crimson" }}>Error: {error}</p>}
@@ -112,6 +114,8 @@ export function App() {
           <p style={{ background: "#f6f8fa", padding: 12, borderRadius: 6, fontSize: 14 }}>{result.commentary}</p>
         </section>
       )}
-    </main>
+      </main>
+      <AuthorFooter productName="MacroShock" tagline="Python · Flask · Streamlit · React/TS · Docker" />
+    </>
   );
 }

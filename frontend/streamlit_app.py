@@ -638,3 +638,61 @@ with tab_model:
 st.divider()
 st.caption("Educational demonstration — not investment advice. See docs/METHODOLOGY.md for all "
            "formulas, calibration sources, and limitations.")
+
+# ---------------------------------------------------------------- personal-branding footer
+_SVG = {
+    "portfolio": '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" '
+                 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" '
+                 'r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 '
+                 '15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+    "github": '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 .5C5.37.5 '
+              '0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73'
+              '-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 '
+              '1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 '
+              '0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 '
+              '0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 '
+              '5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.61-.01 2.9-.01 3.29 0 .32.22.7.83.58A12.01 12.01 0 '
+              '0 0 24 12.5C24 5.87 18.63.5 12 .5z"/></svg>',
+    "linkedin": '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M20.45 '
+                '20.45h-3.56v-5.57c0-1.33-.03-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.42v1.56h'
+                '.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.07 2.07 0 1 1 '
+                '0-4.14 2.07 2.07 0 0 1 0 4.14zM7.12 20.45H3.55V9h3.57v11.45zM22.22 0H1.77C.79 0 0 .77 0 '
+                '1.72v20.56C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.72V1.72C24 .77 23.2 0 22.22 '
+                '0z"/></svg>',
+}
+_PORT, _GH, _LI = ("https://vaishnavieklaspur-portfolio.vercel.app/",
+                    "https://github.com/vaishnavi-eklaspur",
+                    "https://www.linkedin.com/in/vaishnavi-eklaspur/")
+_footer = """
+<style>
+.ms-af{border-top:1px solid rgba(255,255,255,.09);margin-top:26px;padding-top:18px;
+ font-family:system-ui,-apple-system,sans-serif;}
+.ms-af-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:14px;}
+.ms-af-id{display:flex;align-items:center;gap:11px;text-decoration:none;}
+.ms-af-av{width:34px;height:34px;border-radius:9999px;background:#fff;color:#0f172a;display:flex;
+ align-items:center;justify-content:center;font-size:12px;font-weight:700;letter-spacing:.02em;flex:0 0 auto;}
+.ms-af-name{font-size:12px;font-weight:600;color:#e2e8f0;line-height:1.3;}
+.ms-af-tag{font-size:11px;color:#94a3b8;line-height:1.3;}
+.ms-af-links{display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+.ms-af-link{display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:7px;
+ font-size:11px;font-weight:600;color:#94a3b8;text-decoration:none;transition:color .15s,background .15s;}
+.ms-af-link:hover{color:#fff;background:rgba(255,255,255,.07);}
+.ms-af-copy{margin-top:12px;font-size:11px;color:#64748b;}
+</style>
+<div class="ms-af"><div class="ms-af-row">
+  <a class="ms-af-id" href="__PORT__" target="_blank" rel="noopener noreferrer">
+    <span class="ms-af-av">VE</span>
+    <span><span class="ms-af-name" style="display:block">Built by Vaishnavi Eklaspur</span>
+    <span class="ms-af-tag" style="display:block">Python · Flask · Streamlit · React/TS · Docker</span></span>
+  </a>
+  <div class="ms-af-links">
+    <a class="ms-af-link" href="__PORT__" target="_blank" rel="noopener noreferrer">__SVG_PORT__ Portfolio</a>
+    <a class="ms-af-link" href="__GH__" target="_blank" rel="noopener noreferrer">__SVG_GH__ GitHub</a>
+    <a class="ms-af-link" href="__LI__" target="_blank" rel="noopener noreferrer">__SVG_LI__ LinkedIn</a>
+  </div>
+</div><div class="ms-af-copy">© __YEAR__ MacroShock — a portfolio project by Vaishnavi Eklaspur.</div></div>
+"""
+_footer = (_footer.replace("__PORT__", _PORT).replace("__GH__", _GH).replace("__LI__", _LI)
+           .replace("__SVG_PORT__", _SVG["portfolio"]).replace("__SVG_GH__", _SVG["github"])
+           .replace("__SVG_LI__", _SVG["linkedin"]).replace("__YEAR__", str(dt.datetime.now().year)))
+st.html(_footer)
