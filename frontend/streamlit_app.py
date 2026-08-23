@@ -704,15 +704,16 @@ _footer = """
 .ms-af{border-top:1px solid rgba(255,255,255,.09);margin-top:26px;padding-top:18px;
  font-family:system-ui,-apple-system,sans-serif;}
 .ms-af-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:14px;}
-.ms-af-id{display:flex;align-items:center;gap:11px;text-decoration:none;}
+.ms-af-id{display:flex;align-items:center;gap:11px;text-decoration:none !important;}
 .ms-af-av{width:34px;height:34px;border-radius:9999px;background:#fff;color:#0f172a;display:flex;
  align-items:center;justify-content:center;font-size:12px;font-weight:700;letter-spacing:.02em;flex:0 0 auto;}
 .ms-af-name{font-size:12px;font-weight:600;color:#e2e8f0;line-height:1.3;}
 .ms-af-tag{font-size:11px;color:#94a3b8;line-height:1.3;}
 .ms-af-links{display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
 .ms-af-link{display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:7px;
- font-size:11px;font-weight:600;color:#94a3b8;text-decoration:none;transition:color .15s,background .15s;}
-.ms-af-link:hover{color:#fff;background:rgba(255,255,255,.07);}
+ font-size:11px;font-weight:600;color:#94a3b8 !important;text-decoration:none !important;
+ transition:color .15s,background .15s;}
+.ms-af-link:hover{color:#fff !important;background:rgba(255,255,255,.07);}
 .ms-af-copy{margin-top:12px;font-size:11px;color:#64748b;}
 </style>
 <div class="ms-af"><div class="ms-af-row">
@@ -731,4 +732,7 @@ _footer = """
 _footer = (_footer.replace("__PORT__", _PORT).replace("__GH__", _GH).replace("__LI__", _LI)
            .replace("__SVG_PORT__", _SVG["portfolio"]).replace("__SVG_GH__", _SVG["github"])
            .replace("__SVG_LI__", _SVG["linkedin"]).replace("__YEAR__", str(dt.datetime.now().year)))
-st.html(_footer)
+# st.markdown (not st.html): st.html's sanitizer strips inline <svg>, so the brand logos
+# vanished and only the text labels showed. markdown+unsafe keeps the inline SVGs, and because
+# they use fill/stroke=currentColor they inherit the link colour and stay theme-adaptive.
+st.markdown(_footer, unsafe_allow_html=True)
