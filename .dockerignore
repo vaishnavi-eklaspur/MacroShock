@@ -1,0 +1,22 @@
+# Build-context trim for the dashboard image (built from the repo root). The Dockerfile only
+# COPYs backend/ and frontend/, but excluding the rest keeps the context small and fast.
+.git
+.github
+.claude
+docs
+frontend-react
+deploy
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.venv
+venv
+env
+*.db
+*.sqlite
+*.sqlite3
+.coverage
+htmlcov
+.DS_Store

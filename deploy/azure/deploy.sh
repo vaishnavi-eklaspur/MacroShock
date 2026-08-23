@@ -24,7 +24,9 @@ az containerapp env create -n "$ENV" -g "$RG" -l "$LOC" -o none
 
 echo "==> Build images in ACR (no local Docker needed)"
 az acr build -r "$ACR" -t macroshock-api:latest ./backend
-az acr build -r "$ACR" -t macroshock-dashboard:latest ./frontend
+# Dashboard is built from the repo ROOT (with -f) so its image includes the backend package —
+# the dashboard runs the analytics engine in-process.
+az acr build -r "$ACR" -t macroshock-dashboard:latest -f frontend/Dockerfile .
 LOGIN=$(az acr show -n "$ACR" --query loginServer -o tsv)
 
 # API key handled as a Container Apps SECRET (not a plaintext env var), referenced via secretref.

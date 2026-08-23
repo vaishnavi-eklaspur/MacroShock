@@ -32,13 +32,13 @@ services:
         condition: service_healthy
 
   dashboard:
-    build: ./frontend
-    environment:
-      API_BASE: http://api:5000
+    # Self-contained: runs the analytics engine in-process (no API dependency). Built from the
+    # repo root so the image can include the backend package (see frontend/Dockerfile).
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     ports:
       - "8501:8501"
-    depends_on:
-      - api
 
   # Optional React/TypeScript client (served by nginx). The browser calls the API on
   # localhost:5050, so the API's CORS must allow http://localhost:5173 (it does by default).

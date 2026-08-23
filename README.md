@@ -8,9 +8,9 @@ an institutional risk desk, in a small, tested, deployable stack.
 
 [![CI](https://github.com/vaishnavi-eklaspur/MacroShock/actions/workflows/ci.yml/badge.svg)](https://github.com/vaishnavi-eklaspur/MacroShock/actions/workflows/ci.yml)
 ![coverage](https://img.shields.io/badge/coverage-79%25-brightgreen)
-![tests](https://img.shields.io/badge/tests-52%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-53%20passing-brightgreen)
 
-**▶ Live demo: [macroshock.streamlit.app](https://macroshock.streamlit.app)** · API health → [macroshock-api.onrender.com/health](https://macroshock-api.onrender.com/health)
+**▶ Live demo: [macroshock.streamlit.app](https://macroshock.streamlit.app)** — a self-contained dashboard running the analytics engine in-process.
 
 > Educational demonstration on real market data — **not** investment advice, **not** a
 > regulatory-grade system. Its limits are stated explicitly below and in
@@ -77,22 +77,25 @@ thing to distrust.
 ## Architecture
 
 ```
-React + TS client ─┐
-                   ├─REST→  Flask API  ──→  Redis cache (graceful fallback)
-Streamlit dashboard┘        (pydantic,        │
-                            rate-limited,     ▼
-                            /metrics)   Analytics core (numpy/scipy) ──→ Data layer
-                                        cov · VaR/CVaR · OLS betas       SQLite (or real
-                                        MCTR · reverse-stress · TE       Snowflake adapter)
+React + TS client ──REST→  Flask API  ──→  Redis cache (graceful fallback)
+                           (pydantic,          │
+                           rate-limited,       ▼
+                           /metrics)     Analytics core (numpy/scipy) ──→ Data layer
+Streamlit dashboard ─────────────────→  cov · VaR/CVaR · OLS betas       SQLite (or real
+   (embeds the core in-process)         MCTR · reverse-stress · TE       Snowflake adapter)
 ```
+
+The analytics core is a plain Python library: the **Streamlit dashboard embeds it in-process**
+(so the live demo is a single self-contained app), while the **Flask API wraps the same core**
+for the React client and any programmatic caller.
 
 | Layer | Tech | Notes |
 |---|---|---|
-| UI | **Streamlit** dashboard + **React/TypeScript** client (`frontend-react/`) | two independent front-ends over one typed API |
+| UI | **Streamlit** dashboard (engine in-process) + **React/TypeScript** client (`frontend-react/`) over the Flask API | two independent front-ends, one analytics core |
 | API | **Flask** + pydantic | validated, Redis-cached, API-key + rate-limited, `/metrics` |
 | Analytics | **Python / numpy / scipy** | pure, tested functions ([`docs/METHODOLOGY.md`](docs/METHODOLOGY.md)) |
 | Data | **SQL** — SQLite via a mock **Snowflake** connector | mirrors the real connector API (`cursor.execute`, `fetch_pandas_all`); swap for `snowflake-connector-python` in prod |
-| Deploy | **Docker Compose**, **Render** (`render.yaml`), **Azure** (`deploy/azure/`) | one command locally; two clicks to the cloud |
+| Deploy | **Streamlit Community Cloud** (self-contained dashboard) · **Azure Container Apps** (`deploy/azure/`) · **Docker Compose** (local) | live demo is one URL; full stack in one command |
 
 ## Run it
 
