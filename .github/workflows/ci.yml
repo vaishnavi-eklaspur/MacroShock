@@ -56,6 +56,30 @@ jobs:
           npm ci
           npm run build
 
+  security-audit:
+    # Dependency vulnerability scanning. npm production deps are gated hard (they ship to the
+    # browser); pip-audit is advisory (non-blocking) so a future transitive CVE in an
+    # unmaintained snapshot doesn't turn the badge red, while the scan output stays visible.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: pip-audit (backend dependencies)
+        continue-on-error: true
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r backend/requirements.txt --desc
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: npm audit (shipped production deps — gated at high)
+        working-directory: frontend-react
+        run: |
+          npm ci
+          npm audit --omit=dev --audit-level=high
+
   docker-smoke:
     # Builds and boots the FULL stack and checks it actually serves - catches things unit
     # tests can't (e.g. a volume mount that shadows the code, a broken Dockerfile).

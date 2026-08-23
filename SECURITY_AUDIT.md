@@ -20,7 +20,8 @@ applied, and the gaps left open (see *Known Limitations*).
 | 2 | Dependencies (npm) | Production bundle: **0** known vulnerabilities | — | Verified |
 | 2 | Dependencies (npm) | `nanoid` (high) + `postcss` (moderate) in build toolchain | High/Mod | **Fixed** (`npm audit fix`) |
 | 2 | Dependencies (npm) | `esbuild`/`vite` dev-server advisories (dev-only, not shipped) | Moderate | Flagged (needs breaking `vite@8`) |
-| 2 | Dependencies (pip) | `pip-audit` could not complete in the audit env (network timeouts) | — | Flagged (run in CI) |
+| 2 | Dependencies (pip) | `flask`/`flask-cors`/`gunicorn` on older releases with later security fixes | Medium | **Fixed** (→ 3.1.3 / 6.0.5 / 26.1.0; 53 tests green) |
+| 2 | Dependencies (CI) | No automated dependency scanning in the pipeline | Low | **Fixed** (`security-audit` job: `pip-audit` + `npm audit`) |
 | 3 | Auth & session | Write/delete persistence gated by `X-API-Key`, constant-time `hmac.compare_digest`, fail-closed when unset | — | Verified (403 confirmed) |
 | 3 | Auth & session | No user accounts / passwords / JWT / session cookies exist | — | N/A by design |
 | 3 | Auth & session | Saved portfolios are global (no per-user ownership) | Low | Flagged (limitation) |
@@ -33,6 +34,7 @@ applied, and the gaps left open (see *Known Limitations*).
 | 5 | Transport | Rate limiting per real client IP (ProxyFix + Redis, in-proc fallback) | — | Verified |
 | 5 | Transport | CORS `*` on read/compute API | Low | Verified acceptable (no cookies/credentials) |
 | 6 | Errors & logging | `debug=False`; error handlers return controlled JSON, no stack traces to client | — | Verified |
+| 6 | Errors & logging | Validation errors crashed to 500 (pydantic `ctx` holds a non-serializable exception); no catch-all | Medium | **Fixed** (serialization-safe 400 + catch-all JSON 500) |
 | 6 | Errors & logging | Logs contain method/path/status/latency only — no PII/secrets | — | Verified |
 | 7 | Data protection | App stores **no PII** — only weight vectors + public market-return history | — | Verified |
 | 7 | Data protection | SQLite mock DB; no superuser network connection string | — | Verified / N/A |
@@ -136,34 +138,28 @@ so a broken deploy can't reach main."
 
 ---
 
-## Known Limitations (not fixed — by scope, time, or a decision you should make)
+## Known Limitations (not fixed — by scope or a deliberate decision)
 
-1. **`pip-audit` was not completed in this environment.** Network resolution timed out repeatedly.
-   *Action:* add a `pip-audit` step to CI. Independently, the pinned `flask-cors==4.0.1`,
-   `gunicorn==22.0.0`, and `flask==3.0.3` all have newer patch releases addressing later advisories
-   — worth upgrading behind the test suite (not applied here because I couldn't run the authoritative
-   audit to confirm, and the API sits behind a platform TLS proxy that mitigates request-smuggling).
+1. **Two npm dev-toolchain advisories remain** (`esbuild`/`vite`). Clearing them requires a breaking
+   `vite@8` upgrade. They affect only the local dev server, never the deployed bundle (which audits
+   at zero), so this is flagged rather than force-upgraded.
 
-2. **Two npm dev-toolchain advisories remain** (`esbuild`/`vite`). Clearing them requires a breaking
-   `vite@8` upgrade. They affect only the local dev server, never the deployed bundle, so I flagged
-   rather than force-upgraded.
-
-3. **No authentication/authorization system.** Saved portfolios are global, not per-user — this is a
+2. **No authentication/authorization system.** Saved portfolios are global, not per-user — this is a
    single-tenant demo, not a multi-user product. If it became multi-user, add real auth and per-user
    ownership checks on `/api/portfolios/<name>` to prevent IDOR.
 
-4. **CORS is `*` on the read/compute API.** Safe today because no cookies/credentials are used; if
+3. **CORS is `*` on the read/compute API.** Safe today because no cookies/credentials are used; if
    credentialed requests are ever introduced, replace `*` with an explicit origin allowlist
    (`CORS_ORIGINS` already supports this).
 
-5. **`/metrics` is unauthenticated** (Prometheus counters by route/status). Low sensitivity, but in a
+4. **`/metrics` is unauthenticated** (Prometheus counters by route/status). Low sensitivity, but in a
    real deployment put it behind network policy or auth.
 
-6. **No encryption at rest.** Justified by #7 — the store holds only public market data and
-   non-sensitive weight vectors.
+5. **No encryption at rest, and SQLite stands in for a production warehouse.** Justified for a demo —
+   the store holds only public market data and non-sensitive weight vectors. A real Snowflake/Postgres
+   deployment should add at-rest encryption, a least-privilege database role, and a managed secrets
+   store rather than a single connection principal.
 
-7. **SQLite stands in for a production warehouse.** A real Snowflake/Postgres deployment should use a
-   least-privilege database role and a managed secrets store, not a single connection principal.
-
-8. **No catch-all 500 handler.** Unexpected exceptions return Flask's default (generic when
-   `debug=False`, so no leak), but a JSON 500 handler would make error responses uniform.
+*Closed since the first pass:* `pip-audit`/`npm audit` now run in CI; `flask`/`flask-cors`/`gunicorn`
+upgraded to current patched releases (53 tests green); validation errors now serialize to a clean 400
+and a catch-all JSON 500 handler covers unexpected errors.
