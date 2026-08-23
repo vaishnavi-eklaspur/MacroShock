@@ -1,7 +1,11 @@
 # Ranges (not exact pins) so the resolver can pick wheels for whatever Python the host uses —
-# Streamlit Community Cloud forces Python 3.14, where older pinned pillow/pandas have no wheels
-# and fail to compile. Newer Streamlit (>=1.40) allows a pillow with 3.14 wheels.
+# Streamlit Community Cloud forces Python 3.14, where older pinned numpy/scipy/pillow have no
+# wheels and fail to compile. Newer Streamlit (>=1.40) allows a pillow with 3.14 wheels.
+#
+# The dashboard now runs the analytics engine IN-PROCESS (no separate HTTP API), so it needs
+# the backend's scientific stack (numpy/scipy) in addition to the UI libraries.
 streamlit>=1.40,<2
 plotly>=5.22
 pandas>=2.2,<3
-requests>=2.31
+numpy>=1.26
+scipy>=1.11

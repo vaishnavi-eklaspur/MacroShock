@@ -10,87 +10,123 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import sys
+import tempfile
+import time
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import requests
 import streamlit as st
 
-def _resolve(name: str, default: str = "") -> str:
-    """Read config from env first, then Streamlit secrets (for Streamlit Community Cloud)."""
-    v = os.getenv(name)
-    if v:
-        return v
-    try:
-        return str(st.secrets[name])   # type: ignore[index]
-    except Exception:
-        return default
+# --- run the analytics engine IN-PROCESS (no separate HTTP API) ----------------------
+# Streamlit Community Cloud has no instance-hour cap — it sleeps when idle and wakes on
+# visit, free forever — so a self-contained app is the one surface that never gets
+# suspended (a standalone API host burns its free hours and gets cut off). The backend
+# package sits one directory up; put it on the import path and drive the engine directly.
+_BACKEND = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend"))
+if _BACKEND not in sys.path:
+    sys.path.insert(0, _BACKEND)
 
-
-API_BASE = _resolve("API_BASE", "http://localhost:5000")
-API_KEY = _resolve("MACROSHOCK_API_KEY") or None
 st.set_page_config(page_title="MacroShock", page_icon="⚡", layout="wide")
 
 
-def _headers() -> dict:
-    return {"X-API-Key": API_KEY} if API_KEY else {}
+@st.cache_resource(show_spinner="Loading the MacroShock analytics engine…")
+def _load_engine():
+    """Seed the SQLite store from the baked real-data CSV snapshot, then build the engine ONCE
+    per server process (the covariance/regime fit is expensive; cache_resource shares it)."""
+    db_path = os.path.join(tempfile.gettempdir(), "macroshock.db")
+    data_dir = os.path.join(_BACKEND, "data")
+    from data import seed
+    seed.seed(
+        db_path=db_path,
+        source=os.getenv("MACROSHOCK_SOURCE", "csv"),
+        csv_path=os.getenv("MACROSHOCK_CSV", os.path.join(data_dir, "real_asset_returns.csv")),
+        factors_csv=os.getenv("MACROSHOCK_FACTORS_CSV",
+                              os.path.join(data_dir, "real_factor_returns.csv")),
+    )
+    from analytics.engine import MacroShockEngine
+    return MacroShockEngine(db_path)
 
 
-def _parse(r) -> dict:
-    """Parse a JSON response, turning API errors and non-JSON bodies into clear messages
-    (instead of a raw JSONDecodeError) — e.g. a wrong API_BASE or a free-tier cold start."""
-    try:
-        body = r.json()
-    except ValueError:
-        snippet = (r.text or "").strip()[:180]
-        raise RuntimeError(
-            f"API at {API_BASE} returned non-JSON ({r.status_code}). Check the dashboard's "
-            f"API_BASE points at the API service, and that it's awake (free tiers sleep — "
-            f"retry in ~30s). Body: {snippet!r}")
-    if r.status_code >= 400:
-        raise RuntimeError(body.get("error", f"{r.status_code} {r.reason}"))
-    return body
+try:
+    _engine = _load_engine()
+    from data import database
+except Exception as exc:  # seeding / data-load failure — surface it, don't render a blank page
+    st.error(f"Could not load the MacroShock analytics engine.\n\n{exc}")
+    st.stop()
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300, show_spinner=False)
 def api_get(path: str) -> dict:
-    try:
-        r = requests.get(f"{API_BASE}{path}", timeout=30)
-    except requests.RequestException as exc:
-        raise RuntimeError(f"Cannot reach API at {API_BASE} ({exc}).")
-    return _parse(r)
+    """In-process replacement for the old HTTP GET: dispatch a read to the engine."""
+    if path == "/api/assets":
+        return {"assets": _engine.asset_reference()}
+    if path == "/api/scenarios":
+        return {"scenarios": _engine.list_scenarios()}
+    if path == "/api/meta":
+        return _engine.meta()
+    if path == "/api/benchmarks":
+        return {"benchmarks": _engine.benchmarks()}
+    if path == "/api/backtest":
+        return _engine.backtest()
+    if path == "/api/exposures":
+        return _engine.exposure_report()
+    if path == "/api/portfolios":
+        return {"portfolios": database.list_portfolios(_engine.db_path)}
+    raise RuntimeError(f"Unknown read route: {path}")
 
 
 def api_post(path: str, payload: dict) -> dict:
-    try:
-        r = requests.post(f"{API_BASE}{path}", json=payload, timeout=30, headers=_headers())
-    except requests.RequestException as exc:
-        raise RuntimeError(f"Cannot reach API at {API_BASE} ({exc}).")
-    return _parse(r)
+    """In-process replacement for the old HTTP POST: dispatch a compute/save to the engine."""
+    w = payload.get("weights", {})
+    if path == "/api/portfolio/stress-test":
+        t0 = time.perf_counter()
+        res = _engine.stress_test(w, payload["scenario_id"], payload.get("confidence", 0.95))
+        res["latency_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+        res["cache_hit"] = False
+        return res
+    if path == "/api/portfolio/custom-stress-test":
+        return _engine.custom_stress_test(w, payload.get("shocks", {}),
+                                          payload.get("name", "Custom scenario"),
+                                          payload.get("confidence", 0.95))
+    if path == "/api/portfolio/active-risk":
+        bench = payload.get("benchmark_weights") or payload.get("benchmark_id") or "US 60/40"
+        return _engine.active_risk(w, bench)
+    if path == "/api/portfolio/reverse-stress-test":
+        return _engine.reverse_stress(w, payload.get("target_loss", 0.20))
+    if path == "/api/portfolio/factor-regression":
+        return _engine.factor_regression(w)
+    if path == "/api/portfolio/risk-contribution":
+        return _engine.risk_report(w)
+    if path == "/api/portfolios":                      # save a named portfolio
+        name = str(payload.get("name", "")).strip()
+        if not name:
+            raise RuntimeError("A non-empty name is required.")
+        if len(name) > 100:
+            raise RuntimeError("Name must be at most 100 characters.")
+        database.save_portfolio(name, w, _engine.db_path)
+        return {"saved": name}
+    raise RuntimeError(f"Unknown compute route: {path}")
 
 
 def api_delete(path: str) -> dict:
-    r = requests.delete(f"{API_BASE}{path}", timeout=30, headers=_headers())
-    if r.status_code >= 400:
-        raise RuntimeError(r.json().get("error", r.text))
-    return r.json()
+    prefix = "/api/portfolios/"
+    if path.startswith(prefix):
+        name = path[len(prefix):]
+        if not database.delete_portfolio(name, _engine.db_path):
+            raise RuntimeError(f"No saved portfolio named '{name}'.")
+        return {"deleted": name}
+    raise RuntimeError(f"Unknown delete route: {path}")
 
 
 def pct(x: float) -> str:
     return f"{x * 100:.2f}%"
 
 
-try:
-    assets = api_get("/api/assets")["assets"]
-    scenarios = api_get("/api/scenarios")["scenarios"]
-    meta = api_get("/api/meta")
-except Exception as exc:
-    st.error(f"Cannot reach the MacroShock API at `{API_BASE}`.\n\n{exc}")
-    st.info("If deployed: check the dashboard's **API_BASE** env var points at the API "
-            "service's real URL, and that the API is awake (free tiers sleep — wait ~30s and "
-            "refresh). Locally: is the backend running?")
-    st.stop()
+assets = api_get("/api/assets")["assets"]
+scenarios = api_get("/api/scenarios")["scenarios"]
+meta = api_get("/api/meta")
 
 tickers = [a["ticker"] for a in assets]
 asset_names = {a["ticker"]: a["name"] for a in assets}

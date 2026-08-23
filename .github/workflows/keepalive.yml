@@ -1,34 +1,18 @@
 name: keep-alive
 
-# Keeps the free-tier deployments warm so a recruiter never lands on a sleep screen.
+# Keeps the free-tier Streamlit deployment warm so a recruiter never lands on a sleep screen.
 #
-# Two mechanisms, because the hosts sleep differently:
-#  - Render sleeps after 15 min without HTTP traffic -> plain curl works. (NOTE: GitHub cron
-#    is throttled to ~hourly in practice, so UptimeRobot at 5-min intervals is the primary
-#    keep-alive for Render; this job is a backup.)
-#  - Streamlit Community Cloud counts only real browser sessions (websocket), so curl does
-#    NOT register as a visit. A headless Chromium visit does — and it also clicks the
-#    "get this app back up" button if the app already fell asleep.
+# The demo now runs entirely on Streamlit Community Cloud (the dashboard drives the analytics
+# engine in-process — no separate API host). Streamlit counts only real browser sessions
+# (websocket), so a plain curl does NOT register as a visit: a headless Chromium visit does,
+# and it also clicks the "get this app back up" button if the app has fallen asleep.
 on:
   schedule:
-    - cron: "*/10 * * * *"      # curl pings (Render) — fires ~hourly in practice
-    - cron: "23 */4 * * *"      # real browser visit (Streamlit) — needs to land < its idle window
+    - cron: "23 */4 * * *"      # real browser visit — must land inside the idle window
   workflow_dispatch: {}
 
 jobs:
-  ping:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Ping the API and Render dashboard (HTTP is enough for Render)
-        run: |
-          curl -sS -m 90 -o /dev/null -w "api  -> %{http_code} in %{time_total}s\n" \
-            https://macroshock-api.onrender.com/health || echo "api ping failed (non-fatal)"
-          curl -sS -m 90 -o /dev/null -w "dash -> %{http_code} in %{time_total}s\n" \
-            https://macroshock-dashboard.onrender.com/ || echo "render dash ping failed (non-fatal)"
-
   browser-visit:
-    # Streamlit needs a real session; run only on the 4-hourly schedule (or manual dispatch).
-    if: github.event.schedule == '23 */4 * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-node@v4
