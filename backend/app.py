@@ -113,6 +113,15 @@ def create_app() -> Flask:
         dt_ms = (time.perf_counter() - getattr(g, "t0", time.perf_counter())) * 1000
         logger.info('method=%s path=%s status=%s latency_ms=%.1f',
                     request.method, path, resp.status_code, dt_ms)
+        # Security headers. This service only ever returns JSON/plain text (never HTML), so the
+        # CSP can be maximally strict; nosniff + DENY + no-referrer are cheap defence-in-depth.
+        # HSTS only when the (proxied) request arrived over HTTPS, so local http dev is unaffected.
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("X-Frame-Options", "DENY")
+        resp.headers.setdefault("Referrer-Policy", "no-referrer")
+        resp.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+        if request.is_secure:
+            resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         return resp
 
     @app.get("/metrics")

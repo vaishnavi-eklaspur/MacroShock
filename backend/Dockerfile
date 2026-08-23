@@ -14,6 +14,11 @@ COPY . .
 # never shadow the source. MACROSHOCK_DB points here in compose and on Azure.
 RUN mkdir -p /app/dbdata
 
+# Drop root: the process never needs it, and running unprivileged limits the blast radius of a
+# compromise. gunicorn binds 5000 (>1024, no privilege needed); the app only writes /app/dbdata.
+RUN useradd -u 10001 -m appuser && chown -R appuser /app
+USER appuser
+
 EXPOSE 5000
 
 # Seed the SQLite database (idempotent) then serve the API with gunicorn.

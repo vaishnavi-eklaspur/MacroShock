@@ -10,6 +10,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Drop root (least privilege). HOME must be set explicitly: Docker doesn't derive it from USER,
+# and Streamlit writes its cache/config under $HOME/.streamlit.
+RUN useradd -u 10001 -m appuser && chown -R appuser /app
+ENV HOME=/home/appuser
+USER appuser
+
 EXPOSE 8501
 
 # fileWatcherType=none: no code-reloading in prod (saves memory/CPU, avoids a watchdog
