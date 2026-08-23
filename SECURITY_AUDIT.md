@@ -1,8 +1,9 @@
 # MacroShock — Security & Production-Readiness Audit
 
 **Scope:** Flask API (`backend/`), Streamlit dashboard (`frontend/`), React/TypeScript client
-(`frontend-react/`), and deployment configs (Docker, Render, Azure, CI).
-**Date:** 2026-08-23 · **Commit at audit:** `c191250`
+(`frontend-react/`), and deployment configs (Docker Compose, Azure Container Apps, Streamlit
+Community Cloud, GitHub Actions CI).
+**Date:** 2026-08-23 · reflects work through the current `main`.
 
 This document records what was **tested** and what was **addressed**. It does not claim the
 application is "secure" or "leakproof" — it states the specific checks performed, the fixes
@@ -14,7 +15,7 @@ applied, and the gaps left open (see *Known Limitations*).
 
 | # | Category | Finding | Severity | Status |
 |---|----------|---------|----------|--------|
-| 1 | Secrets & credentials | Full git-history scan (50 commits) found no hardcoded keys/tokens/private keys | — | Verified clean |
+| 1 | Secrets & credentials | Full git-history scan (all commits) found no hardcoded keys/tokens/private keys | — | Verified clean |
 | 1 | Secrets & credentials | `.env` gitignored and never committed; only `.env.example` (placeholder `change-me`) | — | Verified |
 | 1 | Secrets & credentials | Secrets read from env (`MACROSHOCK_API_KEY`); Render `sync:false`, Azure `secretref` — none baked into code | — | Verified |
 | 2 | Dependencies (npm) | Production bundle: **0** known vulnerabilities | — | Verified |
@@ -26,7 +27,7 @@ applied, and the gaps left open (see *Known Limitations*).
 | 3 | Auth & session | No user accounts / passwords / JWT / session cookies exist | — | N/A by design |
 | 3 | Auth & session | Saved portfolios are global (no per-user ownership) | Low | Flagged (limitation) |
 | 4 | Injection — SQL | All queries parameterized (`?` placeholders) in `database.py`, `seed.py` | — | Verified |
-| 4 | Injection — XSS | Streamlit escapes by default; no `unsafe_allow_html=True`; the one `st.html()` is a static footer | — | Verified |
+| 4 | Injection — XSS | Streamlit escapes by default; the one raw-HTML block (branding footer via `st.markdown(unsafe_allow_html=True)`) is fully hardcoded — no user input | — | Verified |
 | 4 | Injection — cmd | No `eval`/`exec`/`os.system`/`subprocess`/`shell=True` anywhere | — | Verified |
 | 4 | Injection — SSRF | Outbound requests only to hardcoded tickers / env-set base — never user-controlled URLs | — | Verified |
 | 4 | Input validation | Pydantic bounds on every POST body (finite, non-negative, ranged, length-capped) | — | Verified |
@@ -41,9 +42,9 @@ applied, and the gaps left open (see *Known Limitations*).
 | 8 | Config hygiene | `backend/.coverage` (build artifact) was tracked in git | Low | **Fixed** (untracked + gitignored) |
 | 8 | Config hygiene | Docker images ran as root | Medium | **Fixed** (non-root user in both) |
 | 8 | Config hygiene | `.gitignore` covers `.env`, DBs, `node_modules`, `dist`; README has no live creds | — | Verified |
-| 9 | Code quality | 52 tests / 12 files; CI coverage gate `--cov-fail-under=75` (~79% actual) | — | Verified |
-| 9 | Code quality | CI: math-verify, test matrix (3.11/3.12) + ruff, React `tsc` build, docker-smoke | — | Verified |
-| 9 | Code quality | 50 commits, incremental & descriptive — not a single squash | — | Verified |
+| 9 | Code quality | 53 tests / 12 files; CI coverage gate `--cov-fail-under=75` (~79% actual) | — | Verified |
+| 9 | Code quality | CI: math-verify, test matrix (3.11/3.12) + ruff, React `tsc` build, security-audit, docker-smoke | — | Verified |
+| 9 | Code quality | 55 commits, incremental & descriptive — not a single squash | — | Verified |
 
 ---
 
@@ -64,11 +65,13 @@ secret, and history is clean, so there's nothing to rotate or scrub."
 browser (React/React-DOM). The advisories that existed were all in the build toolchain; I applied
 the non-breaking ones (`nanoid` high, `postcss` moderate) with `npm audit fix` and left the
 `esbuild`/`vite` ones flagged because clearing them needs a breaking `vite@8` upgrade and they only
-affect the local dev server, never the deployed static bundle. `pip-audit` didn't finish in the
-audit environment (repeated network timeouts resolving the tree), so I flagged it to run in CI
-rather than hand-wave a result. **Interview line:** "I separated 'what ships' from 'what builds' —
-the shipped bundle is clean; the remaining findings are dev-only and I documented the breaking
-upgrade instead of forcing it blind."
+affect the local dev server, never the deployed static bundle. On the Python side I upgraded
+`flask` (3.0.3→3.1.3), `flask-cors` (4.0.1→6.0.5) and `gunicorn` (22.0.0→26.1.0) to current patched
+releases and confirmed the full suite stayed green, and added a `security-audit` CI job that runs
+`pip-audit` and `npm audit` on every push (pip-audit's local run was network-throttled in the audit
+sandbox, so CI is the authoritative run). **Interview line:** "I separated 'what ships' from 'what
+builds' — the shipped bundle is clean, I bumped the web-facing Python libs to patched versions, and
+CI now scans dependencies on every push so this doesn't silently rot."
 
 ### 3 — Authentication & session handling
 There is no user/password/JWT system — this is a stateless analytics service — so the usual
@@ -87,8 +90,9 @@ bounded confidence/target-loss, and length-capped names, so malformed or hostile
 rejected with a clean 400 before touching the engine. There is no `eval`/`exec`/`subprocess`/shell
 usage, so there's no command-injection surface, and the only outbound calls go to hardcoded Yahoo
 tickers — never a user-supplied URL — so there's no SSRF vector. On the UI side, Streamlit escapes
-output by default, nothing uses `unsafe_allow_html=True`, and the single raw-HTML block is a static
-footer with no user input. **Interview line:** "Injection is closed off structurally: parameterized
+output by default; the single raw-HTML block (the branding footer, rendered with
+`st.markdown(unsafe_allow_html=True)`) is fully hardcoded with no user input, so it carries no XSS
+risk. **Interview line:** "Injection is closed off structurally: parameterized
 SQL, schema-validated inputs, no shell, no user-controlled URLs, and an auto-escaping UI."
 
 ### 5 — API & transport security
@@ -106,7 +110,10 @@ requests. **Interview line:** "Because it's a pure JSON API I could lock the CSP
 ### 6 — Error handling & logging
 `debug` is `False` and production runs under gunicorn, so no interactive debugger or stack trace is
 ever exposed to a client. Custom error handlers turn validation/value/lookup errors into controlled
-JSON messages (400/404) instead of leaking internals. Request logging records only
+JSON messages (400/404); I also fixed a latent bug where a custom-validator error crashed to a 500
+(pydantic stashes the raw exception object in a non-serializable `ctx`) and added a catch-all handler
+that logs the trace server-side and returns a generic JSON 500 for anything unexpected — HTTP errors
+and the specific handlers still take precedence. Request logging records only
 method/path/status/latency — no request bodies, no PII, no secrets. **Interview line:** "Clients get
 clean, generic errors; the detail stays in server logs, and the logs never contain sensitive data."
 
@@ -128,7 +135,7 @@ env-var driven with a documented example, and I cleaned a build artifact that ha
 version control."
 
 ### 9 — Code-quality signals
-52 tests across 12 files, with CI enforcing a coverage floor (`--cov-fail-under=75`, ~79% actual).
+53 tests across 12 files, with CI enforcing a coverage floor (`--cov-fail-under=75`, ~79% actual).
 CI runs an independent from-scratch math verification, the test suite on a Python 3.11/3.12 matrix
 with `ruff` linting, a `tsc` type-check + build of the React client, and a docker-smoke job that
 boots the whole stack and asserts it serves. The history is 50 incremental commits with descriptive
