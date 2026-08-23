@@ -25,6 +25,14 @@ def test_custom_stress_rejects_unknown_factor(client):
     assert r.status_code == 400
 
 
+def test_pydantic_validation_error_serializes_to_clean_400(client):
+    # A custom-validator ValidationError must serialize to a clean JSON 400 — not crash into a
+    # 500 (pydantic stashes the raw exception in ctx, which is not JSON-serializable).
+    r = client.post("/api/portfolio/risk-contribution", json={"weights": {}})
+    assert r.status_code == 400
+    assert "error" in r.get_json()
+
+
 def test_persistence_is_disabled_without_a_key(client):
     # Fail-closed: with no MACROSHOCK_API_KEY, writes are refused, not open.
     assert client.post("/api/portfolios",

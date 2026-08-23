@@ -38,6 +38,7 @@ from collections import defaultdict
 from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from pydantic import ValidationError
+from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from data import database
@@ -140,8 +141,12 @@ def create_app() -> Flask:
 
     @app.errorhandler(ValidationError)
     def _validation(exc: ValidationError):
-        first = exc.errors()[0]
-        return jsonify({"error": first.get("msg", "Invalid request."), "details": exc.errors()}), 400
+        # Keep only JSON-serializable fields: for custom-validator errors pydantic puts the raw
+        # exception object in `ctx`, which would crash jsonify and turn a 400 into a 500.
+        details = [{"loc": list(e.get("loc", ())), "msg": e.get("msg"), "type": e.get("type")}
+                   for e in exc.errors()]
+        msg = details[0]["msg"] if details else "Invalid request."
+        return jsonify({"error": msg, "details": details}), 400
 
     @app.errorhandler(ValueError)
     def _bad_request(exc: ValueError):
@@ -150,6 +155,16 @@ def create_app() -> Flask:
     @app.errorhandler(KeyError)
     def _not_found(exc: KeyError):
         return jsonify({"error": str(exc).strip('"')}), 404
+
+    @app.errorhandler(Exception)
+    def _unexpected(exc: Exception):
+        # The specific handlers above and Werkzeug's HTTP errors (404/405/…) are more specific
+        # and still win; this catches only genuinely unexpected errors. Log the full trace
+        # server-side and return a generic message so no internals leak to the client.
+        if isinstance(exc, HTTPException):
+            return exc
+        logger.exception("unhandled error on %s %s", request.method, request.path)
+        return jsonify({"error": "Internal server error."}), 500
 
     @app.get("/")
     def index():
