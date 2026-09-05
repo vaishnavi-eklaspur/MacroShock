@@ -30,3 +30,7 @@ backend/data/*.db
 
 # Workflow run artifacts
 results/
+
+# Go CLI build output
+cli/macroshock-cli
+cli/macroshock-cli.exe

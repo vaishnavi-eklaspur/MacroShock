@@ -79,6 +79,28 @@ Validation is strict and happens *before* any computation — unknown fields, du
 unknown tickers and missing step parameters all fail loudly rather than producing a partial run.
 CI validates and executes the shipped spec on every push.
 
+### Submitting as a job (Go CLI + async workers)
+
+A full analysis is a compute job, not an HTTP request to hold open. `POST /api/workflows`
+validates the spec synchronously and returns **202 + a job id**; a Celery worker executes it and
+`GET /api/jobs/<id>` reports progress. With no broker configured the job runs in-process and the
+record says `"mode": "inline"` — the API never claims work was distributed when it was not.
+
+A small **Go** CLI is the operator-facing front end. It parses and validates the spec locally
+(instant, precise errors — reporting *every* problem at once rather than the first), then
+forwards the original document to the API:
+
+```bash
+cd cli && go build -o macroshock-cli .
+
+./macroshock-cli validate ../macroshock.yaml
+./macroshock-cli submit   ../macroshock.yaml --api http://localhost:5050 --wait
+./macroshock-cli status   <job-id>
+```
+
+Validation is deliberately duplicated in Go and Python: the client fails fast for the author,
+and the server re-validates because a client is never a trust boundary.
+
 ### Running it on REANA
 
 The same spec runs unchanged on [REANA](https://reanahub.io), CERN's reproducible-analysis

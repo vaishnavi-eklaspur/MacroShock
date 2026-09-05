@@ -31,6 +31,20 @@ services:
       redis:
         condition: service_healthy
 
+  # Celery worker: executes submitted workflows off the request path.
+  worker:
+    build: ./backend
+    command: celery -A tasks.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      MACROSHOCK_DB: /app/dbdata/macroshock.db
+      MACROSHOCK_SOURCE: ${MACROSHOCK_SOURCE:-synthetic}
+    volumes:
+      - macroshock-data:/app/dbdata
+    depends_on:
+      redis:
+        condition: service_healthy
+
   dashboard:
     # Self-contained: runs the analytics engine in-process (no API dependency). Built from the
     # repo root so the image can include the backend package (see frontend/Dockerfile).

@@ -5,6 +5,7 @@ stamped artifacts, or it fails loudly before computing anything. Silent partial 
 failure mode a reproducible pipeline must not have.
 """
 import json
+import os
 
 import pytest
 import yaml
@@ -127,6 +128,27 @@ def test_unknown_ticker_fails_before_computing(tmp_path, engine):
         run_workflow(load_spec(_write(tmp_path, bad)), output_dir=out, engine=engine)
     # Fails loudly *before* writing any artifact.
     assert not list(out.glob("*.json"))
+
+
+def test_missing_csv_fails_instead_of_falling_back_to_synthetic(tmp_path):
+    # The seeder degrades to synthetic data when a real source fails — correct for booting a
+    # demo, catastrophic for a reproducible analysis (same spec, different numbers, no error).
+    from workflow.runner import build_engine
+    from workflow.spec import DataSpec
+
+    with pytest.raises((FileNotFoundError, ValueError)):
+        build_engine(DataSpec(source="csv", asset_returns="nope/missing.csv"),
+                     db_path=str(tmp_path / "x.db"))
+
+
+def test_csv_path_resolves_relative_to_the_repository_root(tmp_path):
+    # A spec submitted as a YAML string has no file to anchor relative paths to, so paths like
+    # 'backend/data/...' must still resolve from the repo root.
+    from workflow.runner import _resolve_data_path
+
+    resolved = _resolve_data_path("backend/data/real_asset_returns.csv")
+    assert resolved.endswith("real_asset_returns.csv")
+    assert os.path.exists(resolved)
 
 
 def test_missing_required_step_parameter_is_reported(tmp_path, engine):

@@ -80,6 +80,25 @@ jobs:
           npm ci
           npm audit --omit=dev --audit-level=high
 
+  go-cli:
+    # The Go CLI is a real deliverable (polyglot service boundary), so it is vetted, tested and
+    # exercised against the shipped specification on every push.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Build, vet and test
+        working-directory: cli
+        run: |
+          go mod tidy
+          go vet ./...
+          go test ./...
+          go build -o macroshock-cli .
+      - name: Validate the shipped spec with the CLI
+        run: ./cli/macroshock-cli validate macroshock.yaml
+
   workflow-spec:
     # The declarative workflow is a user-facing contract: validate the shipped spec and execute
     # it end-to-end, asserting the run is reproducible (pinned CSV source, full provenance).

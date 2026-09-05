@@ -19,8 +19,32 @@ from typing import Any, Callable
 from .spec import DataSpec, MacroShockSpec, StepSpec
 
 
+def _resolve_data_path(value: str | None) -> str | None:
+    """Resolve a data file as given, else relative to the repository root.
+
+    A spec submitted as a YAML *string* (over the API) has no file to anchor relative paths to,
+    so a path like `backend/data/x.csv` would otherwise miss depending on the server's working
+    directory. Missing files raise here rather than degrading silently.
+    """
+    if not value:
+        return value
+    given = Path(value)
+    if given.exists():
+        return str(given)
+    repo_root = Path(__file__).resolve().parents[2]     # backend/workflow/runner.py -> repo root
+    candidate = repo_root / value
+    if candidate.exists():
+        return str(candidate)
+    raise FileNotFoundError(f"data file not found: '{value}' (also tried '{candidate}')")
+
+
 def build_engine(data: DataSpec, db_path: str | None = None):
-    """Seed the store from the spec's data source and return a loaded engine."""
+    """Seed the store from the spec's data source and return a loaded engine.
+
+    Refuses to run on anything other than the requested source: the seeder falls back to
+    synthetic data when a real source fails, which is right for booting a demo but wrong for a
+    reproducible analysis — the same spec would silently yield different numbers.
+    """
     from analytics.engine import MacroShockEngine  # noqa: PLC0415 - keep import cost lazy
     from data import seed as seed_mod  # noqa: PLC0415
 
@@ -28,11 +52,20 @@ def build_engine(data: DataSpec, db_path: str | None = None):
     seed_mod.seed(
         db_path=db,
         source=data.source,
-        csv_path=data.asset_returns,
-        factors_csv=data.factor_returns,
+        csv_path=_resolve_data_path(data.asset_returns),
+        factors_csv=_resolve_data_path(data.factor_returns),
         start=data.start or "2010-01-01",
     )
-    return MacroShockEngine(db)
+    engine = MacroShockEngine(db)
+
+    actual = str(engine.dataset_meta.get("source", "unknown"))
+    if not actual.startswith(data.source):
+        raise ValueError(
+            f"requested data source '{data.source}' but the loaded dataset reports '{actual}'. "
+            "Refusing to continue: a silent fallback would produce different numbers for the "
+            "same specification."
+        )
+    return engine
 
 
 def _require(params: dict[str, Any], key: str, step: str) -> Any:

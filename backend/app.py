@@ -35,6 +35,8 @@ import os
 import time
 from collections import defaultdict
 
+import yaml
+
 from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from prometheus_client import (
@@ -54,6 +56,8 @@ from analytics import factors as factors_mod
 from analytics import rebalance as rebalance_mod
 from analytics.engine import MacroShockEngine, _optimized_rebalance_dict
 from cache import Cache
+from jobs import JobQueue
+from workflow.spec import MacroShockSpec
 from schemas import (
     ActiveRiskRequest,
     CustomStressRequest,
@@ -79,6 +83,7 @@ def create_app() -> Flask:
                          r"/health": {"origins": "*"}})
     engine = MacroShockEngine()
     cache = Cache()
+    job_queue = JobQueue()
 
     api_key = os.getenv("MACROSHOCK_API_KEY")
     rate_per_min = int(os.getenv("MACROSHOCK_RATE_PER_MIN", "120"))
@@ -202,7 +207,8 @@ def create_app() -> Flask:
     def health():
         return jsonify({"status": "ok", "cache_enabled": cache.enabled,
                         "model_version": engine.model_version, "assets": engine.tickers,
-                        "data_source": engine.dataset_meta.get("source", "unknown")})
+                        "data_source": engine.dataset_meta.get("source", "unknown"),
+                        "job_queue": "celery" if job_queue.enabled else "inline"})
 
     @app.get("/api/meta")
     def meta():
@@ -327,6 +333,31 @@ def create_app() -> Flask:
         asset_scn = factors_mod.scenario_asset_returns(engine.assets, shocks)
         rec = rebalance_mod.optimize_rebalance(w, engine.tickers, asset_scn, engine.stressed_cov)
         return jsonify(_optimized_rebalance_dict(rec))
+
+    # ---------------------------------------------------------------- async workflows
+    @app.post("/api/workflows")
+    def submit_workflow():
+        """Submit a declarative workflow for execution; returns a job id (202), not a result.
+
+        A full analysis is a compute job, so it is queued to a worker rather than held open on an
+        HTTP connection. The spec is validated synchronously, so a malformed submission fails
+        immediately with 400 instead of failing later inside a worker.
+        """
+        body = request.get_json(force=True) or {}
+        raw = body.get("spec")
+        if isinstance(body.get("spec_yaml"), str):
+            raw = yaml.safe_load(body["spec_yaml"])
+        if not isinstance(raw, dict):
+            raise ValueError("Provide the specification as 'spec' (object) or 'spec_yaml' (string).")
+        spec = MacroShockSpec(**raw)          # ValidationError -> 400 via the handler above
+        return jsonify(job_queue.submit(spec)), 202
+
+    @app.get("/api/jobs/<job_id>")
+    def job_status(job_id: str):
+        job = job_queue.status(job_id)
+        if job is None:
+            raise KeyError(f"No job with id '{job_id}'")
+        return jsonify(job)
 
     # ---------------------------------------------------------------- saved portfolios
     @app.get("/api/portfolios")
