@@ -8,9 +8,12 @@ name: keep-alive
 # and it also clicks the "get this app back up" button if the app has fallen asleep.
 on:
   schedule:
-    - cron: "23 */2 * * *"      # real browser visit — must land inside the idle window.
-                                # Every 2h (not 4h): Streamlit's idle window can be shorter
-                                # than 4h, and a cold container costs a visitor ~30-60s.
+    # Configured every 30 min, NOT because the app sleeps that fast, but because GitHub
+    # throttles scheduled workflows on shared runners: an observed */2h schedule actually
+    # fired every 6-8h, which is wide enough for the container to go cold. Over-scheduling
+    # buys back the delivered rate. Actions minutes are free on a public repository, so the
+    # only cost is runner time nobody is billed for.
+    - cron: "*/30 * * * *"
   workflow_dispatch: {}
 
 # Least privilege for the GITHUB_TOKEN -- read-only: this job only visits a public URL.
