@@ -40,6 +40,10 @@ services:
       # Data source seeded at container start: synthetic (default) | yahoo | csv.
       MACROSHOCK_SOURCE: ${MACROSHOCK_SOURCE:-synthetic}
       MACROSHOCK_START: ${MACROSHOCK_START:-2012-01-01}
+      MACROSHOCK_S3_ENDPOINT: http://minio:9000
+      MACROSHOCK_S3_ACCESS_KEY: macroshock
+      MACROSHOCK_S3_SECRET_KEY: macroshock123
+      MACROSHOCK_S3_BUCKET: macroshock
       # Uncomment to require an API key on write endpoints:
       # MACROSHOCK_API_KEY: ${MACROSHOCK_API_KEY:-}
     ports:
@@ -48,6 +52,8 @@ services:
       - macroshock-data:/app/dbdata    # DB-only volume (NOT over /app/data code) — survives restarts
     depends_on:
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   # Celery worker: executes submitted workflows off the request path.
@@ -58,10 +64,16 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       MACROSHOCK_DB: /app/dbdata/macroshock.db
       MACROSHOCK_SOURCE: ${MACROSHOCK_SOURCE:-synthetic}
+      MACROSHOCK_S3_ENDPOINT: http://minio:9000
+      MACROSHOCK_S3_ACCESS_KEY: macroshock
+      MACROSHOCK_S3_SECRET_KEY: macroshock123
+      MACROSHOCK_S3_BUCKET: macroshock
     volumes:
       - macroshock-data:/app/dbdata
     depends_on:
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   dashboard:
