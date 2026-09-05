@@ -12,6 +12,14 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # The language runtime is a human decision, not a bot's. The backend pins exact
+      # numpy/scipy/pandas versions that only ship wheels for particular interpreters, and the
+      # CI matrix covers 3.11/3.12 -- so a jump to 3.14 breaks the build (Dependabot proved it).
+      # An explicit rule is required because 3.11 -> 3.14 reads as a MINOR bump (major is "3").
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "node"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: pip
     directory: "/backend"
