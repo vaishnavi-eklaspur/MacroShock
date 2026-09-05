@@ -1,0 +1,21 @@
+MacroShock {{ .Chart.AppVersion }} deployed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+{{ if .Values.dashboard.enabled -}}
+Analysis dashboard:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "macroshock.fullname" . }}-{{ .Values.dashboard.name }} 8501:{{ .Values.dashboard.service.port }}
+  then open http://localhost:8501
+{{ end -}}
+{{ if .Values.api.enabled }}
+Compute API:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "macroshock.fullname" . }}-{{ .Values.api.name }} 5000:{{ .Values.api.service.port }}
+  health   -> http://localhost:5000/health
+  metrics  -> http://localhost:5000/metrics   (Prometheus exposition)
+
+{{ if not .Values.api.apiKeySecret.enabled -}}
+NOTE: no API key configured, so portfolio persistence (POST/DELETE /api/portfolios) is
+      DISABLED by design (fail-closed). Set api.apiKeySecret.* to enable it.
+{{ end -}}
+{{ end -}}
+{{ if .Values.metrics.serviceMonitor.enabled }}
+A ServiceMonitor was created; Prometheus Operator will scrape the API every {{ .Values.metrics.serviceMonitor.interval }}.
+{{ end -}}

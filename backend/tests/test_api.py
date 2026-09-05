@@ -25,6 +25,17 @@ def test_custom_stress_rejects_unknown_factor(client):
     assert r.status_code == 400
 
 
+def test_metrics_endpoint_exposes_prometheus_format(client):
+    # /metrics must return Prometheus exposition (prometheus_client), so a Prometheus server /
+    # Kubernetes ServiceMonitor can scrape it. Hit an endpoint first so a counter exists.
+    client.get("/health")
+    r = client.get("/metrics")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert "macroshock_requests_total" in body
+    assert "macroshock_request_latency_seconds" in body
+
+
 def test_pydantic_validation_error_serializes_to_clean_400(client):
     # A custom-validator ValidationError must serialize to a clean JSON 400 — not crash into a
     # 500 (pydantic stashes the raw exception in ctx, which is not JSON-serializable).

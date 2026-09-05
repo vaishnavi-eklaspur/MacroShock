@@ -1,0 +1,97 @@
+# Default values for the macroshock chart.
+# Override with:  helm install macroshock ./charts/macroshock -f my-values.yaml
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  registry: ghcr.io
+  repository: vaishnavi-eklaspur
+  # Pin to an immutable tag (a git SHA or release) in real deployments; "latest" is a
+  # convenience default only. Reproducibility starts at the image tag.
+  tag: "latest"
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Pod-level hardening applied to both workloads. The images create an unprivileged
+# uid 10001 (see the Dockerfiles), so nothing needs to run as root.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  # Left writable: the API seeds its SQLite store at container start.
+  readOnlyRootFilesystem: false
+
+# ---------------------------------------------------------------- compute API (Flask)
+api:
+  enabled: true
+  name: api
+  image: macroshock-api
+  replicaCount: 2
+  containerPort: 5000
+  # Boot from the committed real-data snapshot so every replica computes identical results.
+  env:
+    MACROSHOCK_SOURCE: "csv"
+    MACROSHOCK_CSV: "data/real_asset_returns.csv"
+    MACROSHOCK_FACTORS_CSV: "data/real_factor_returns.csv"
+    MACROSHOCK_DB: "/app/dbdata/macroshock.db"
+  # Set to enable server-side portfolio persistence; unset => writes are refused (fail-closed).
+  apiKeySecret:
+    enabled: false
+    secretName: ""
+    secretKey: "api-key"
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+# ---------------------------------------------------------------- dashboard (Streamlit)
+dashboard:
+  enabled: true
+  name: dashboard
+  image: macroshock-dashboard
+  replicaCount: 1
+  containerPort: 8501
+  env: {}
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# ---------------------------------------------------------------- observability
+metrics:
+  # Annotate API pods so a plain Prometheus scrape config discovers /metrics.
+  podAnnotations: true
+  serviceMonitor:
+    # Enable when the Prometheus Operator (ServiceMonitor CRD) is installed in the cluster.
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Routes "/" to the dashboard and "/api" to the compute API.
+  host: macroshock.local
+  tls: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

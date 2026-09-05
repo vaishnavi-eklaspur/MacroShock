@@ -1,0 +1,21 @@
+apiVersion: v2
+name: macroshock
+description: |
+  A reproducible, containerised analytics platform: a validated Flask compute API and a
+  Streamlit analysis dashboard that run the same deterministic, model-versioned engine.
+  Packaged for Kubernetes with Prometheus instrumentation and non-root workloads.
+type: application
+version: 0.1.0
+appVersion: "4.0.0"
+keywords:
+  - reproducible-research
+  - scientific-computing
+  - risk-analytics
+  - prometheus
+  - observability
+home: https://github.com/vaishnavi-eklaspur/MacroShock
+sources:
+  - https://github.com/vaishnavi-eklaspur/MacroShock
+maintainers:
+  - name: Vaishnavi Eklaspur
+    url: https://github.com/vaishnavi-eklaspur

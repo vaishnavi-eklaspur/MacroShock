@@ -8,13 +8,35 @@ an institutional risk desk, in a small, tested, deployable stack.
 
 [![CI](https://github.com/vaishnavi-eklaspur/MacroShock/actions/workflows/ci.yml/badge.svg)](https://github.com/vaishnavi-eklaspur/MacroShock/actions/workflows/ci.yml)
 ![coverage](https://img.shields.io/badge/coverage-79%25-brightgreen)
-![tests](https://img.shields.io/badge/tests-53%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-54%20passing-brightgreen)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+![helm](https://img.shields.io/badge/Helm-chart-0f1689)
 
 **▶ Live demo: [macroshock.streamlit.app](https://macroshock.streamlit.app)** — a self-contained dashboard running the analytics engine in-process.
 
 > Educational demonstration on real market data — **not** investment advice, **not** a
 > regulatory-grade system. Its limits are stated explicitly below and in
 > [`docs/DESIGN_AND_MATH.md`](docs/DESIGN_AND_MATH.md).
+
+---
+
+## Reproducibility by construction
+
+The engine is a **deterministic computational workload**: the same inputs must yield bit-identical
+outputs on any machine, or the analysis is worthless. That property is engineered, not assumed:
+
+| Mechanism | Where | What it guarantees |
+|---|---|---|
+| **Pinned inputs** | `backend/data/real_*.csv` | The published results run against a committed, immutable market-data snapshot — not a live feed that changes under you. Provenance (source, window, week count) is recorded in `dataset_meta` and served at `/api/meta`. |
+| **Seeded generation** | `RANDOM_SEED` in `data/reference.py` | The synthetic two-regime generator is fully seeded; regenerating the dataset reproduces it exactly. |
+| **Model versioning** | `MODEL_VERSION` in the cache key | A recalibration can never serve a stale cached number — changing the model invalidates every prior entry by construction. |
+| **Pinned environment** | exact `==` pins + Docker images | The same dependency set and the same image run locally, in CI, and in Kubernetes. |
+| **Independent re-derivation** | `scripts/verify_math.py` (CI gate) | Every core formula is re-implemented using only the Python standard library and asserted against the engine — so a numerical regression cannot hide behind the same library that produced it. |
+| **Executable environment** | `charts/macroshock/`, `docker compose` | The whole platform is declarative: one `helm install` reproduces the running system, not just the numbers. |
+
+This is why the out-of-sample backtest below reports a *negative* skill score rather than a
+flattering one: the pipeline is built so results can't be quietly tuned, and the honest number is
+the one that survives.
 
 ---
 
@@ -92,10 +114,11 @@ for the React client and any programmatic caller.
 | Layer | Tech | Notes |
 |---|---|---|
 | UI | **Streamlit** dashboard (engine in-process) + **React/TypeScript** client (`frontend-react/`) over the Flask API | two independent front-ends, one analytics core |
-| API | **Flask** + pydantic | validated, Redis-cached, API-key + rate-limited, `/metrics` |
+| API | **Flask** + pydantic | validated, Redis-cached, API-key + rate-limited; **`prometheus_client`** counters + latency histogram at `/metrics` |
 | Analytics | **Python / numpy / scipy** | pure, tested functions ([`docs/METHODOLOGY.md`](docs/METHODOLOGY.md)) |
 | Data | **SQL** — SQLite via a mock **Snowflake** connector | mirrors the real connector API (`cursor.execute`, `fetch_pandas_all`); swap for `snowflake-connector-python` in prod |
-| Deploy | **Streamlit Community Cloud** (self-contained dashboard) · **Azure Container Apps** (`deploy/azure/`) · **Docker Compose** (local) | live demo is one URL; full stack in one command |
+| Deploy | **Kubernetes + Helm** (`charts/macroshock/`) · **Streamlit Community Cloud** (self-contained dashboard) · **Azure Container Apps** · **Docker Compose** (local) | one `helm install` for a cluster; images published to GHCR by CI |
+| Observability | **Prometheus** exposition + optional **ServiceMonitor** | pod scrape annotations out of the box; Prometheus Operator supported via `metrics.serviceMonitor.enabled` |
 
 ## Run it
 
@@ -103,6 +126,22 @@ for the React client and any programmatic caller.
 docker compose up --build
 ```
 Dashboard → <http://localhost:8501> · API → <http://localhost:5050> · React → <http://localhost:5173>
+
+### On Kubernetes
+
+The platform ships as a Helm chart. CI lints it, renders every feature path, schema-validates the
+output with `kubeconform`, and publishes both images to GHCR — so what you install is what CI proved.
+
+```bash
+helm install macroshock ./charts/macroshock
+
+# with Prometheus Operator scraping and an ingress:
+helm install macroshock ./charts/macroshock   --set metrics.serviceMonitor.enabled=true   --set ingress.enabled=true --set ingress.host=macroshock.example.org   --set image.tag=v4.0.0
+```
+
+Both workloads run as an unprivileged user with `allowPrivilegeEscalation: false`, dropped
+capabilities, resource limits, and startup/readiness/liveness probes. Portfolio persistence is
+**fail-closed**: without `api.apiKeySecret`, write endpoints are disabled rather than left open.
 
 <details>
 <summary>Without Docker, real data, tests</summary>

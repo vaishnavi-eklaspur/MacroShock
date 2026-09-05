@@ -37,6 +37,13 @@ from collections import defaultdict
 
 from flask import Flask, g, jsonify, request
 from flask_cors import CORS
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    Counter,
+    Histogram,
+    generate_latest,
+)
 from pydantic import ValidationError
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -76,7 +83,15 @@ def create_app() -> Flask:
     api_key = os.getenv("MACROSHOCK_API_KEY")
     rate_per_min = int(os.getenv("MACROSHOCK_RATE_PER_MIN", "120"))
     hits: dict[str, list[float]] = defaultdict(list)
-    metrics: dict[str, int] = defaultdict(int)           # {(path,status): count}
+    # Prometheus metrics on a PER-APP registry: the app factory is called repeatedly (tests,
+    # multiple gunicorn workers import fresh), and a per-app registry avoids the "Duplicated
+    # timeseries" error you get from registering the same metric on the global default registry.
+    registry = CollectorRegistry()
+    req_total = Counter("macroshock_requests_total", "Total HTTP requests by route and status.",
+                        ["method", "path", "status"], registry=registry)
+    req_latency = Histogram("macroshock_request_latency_seconds",
+                            "HTTP request latency in seconds by route.",
+                            ["method", "path"], registry=registry)
     if not api_key:
         logger.warning("MACROSHOCK_API_KEY not set: portfolio persistence (write/delete) is "
                        "DISABLED. Set it (and match it in the dashboard) to enable saving.")
@@ -110,10 +125,11 @@ def create_app() -> Flask:
     @app.after_request
     def _observe(resp):
         path = (request.url_rule.rule if request.url_rule else request.path)
-        metrics[f'{path}|{resp.status_code}'] += 1
-        dt_ms = (time.perf_counter() - getattr(g, "t0", time.perf_counter())) * 1000
+        elapsed = time.perf_counter() - getattr(g, "t0", time.perf_counter())
+        req_total.labels(request.method, path, resp.status_code).inc()
+        req_latency.labels(request.method, path).observe(elapsed)
         logger.info('method=%s path=%s status=%s latency_ms=%.1f',
-                    request.method, path, resp.status_code, dt_ms)
+                    request.method, path, resp.status_code, elapsed * 1000)
         # Security headers. This service only ever returns JSON/plain text (never HTML), so the
         # CSP can be maximally strict; nosniff + DENY + no-referrer are cheap defence-in-depth.
         # HSTS only when the (proxied) request arrived over HTTPS, so local http dev is unaffected.
@@ -127,12 +143,9 @@ def create_app() -> Flask:
 
     @app.get("/metrics")
     def prometheus_metrics():
-        lines = ["# HELP macroshock_requests_total Total HTTP requests by route and status.",
-                 "# TYPE macroshock_requests_total counter"]
-        for k, v in metrics.items():
-            path, status = k.rsplit("|", 1)
-            lines.append(f'macroshock_requests_total{{path="{path}",status="{status}"}} {v}')
-        return "\n".join(lines) + "\n", 200, {"Content-Type": "text/plain; version=0.0.4"}
+        # Standard Prometheus exposition (request counters + a latency histogram) via
+        # prometheus_client — the format Prometheus scrapes and Grafana/K8s dashboards expect.
+        return generate_latest(registry), 200, {"Content-Type": CONTENT_TYPE_LATEST}
 
     def check_tickers(weights: dict[str, float]) -> None:
         unknown = set(weights) - set(engine.tickers)
