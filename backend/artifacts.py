@@ -99,17 +99,11 @@ class ArtifactStore:
                 published.append({
                     "key": key,
                     "size_bytes": path.stat().st_size,
-                    "url": self.presigned_url(key),
+                    "url": self._client.generate_presigned_url(
+                        "get_object", Params={"Bucket": self.bucket, "Key": key},
+                        ExpiresIn=self.expiry),
                     "expires_in_seconds": self.expiry,
                 })
             except Exception as exc:  # pragma: no cover - environment dependent
                 logger.warning("Failed to publish %s: %s", key, exc)
         return published
-
-    def presigned_url(self, key: str, expiry: int | None = None) -> str:
-        """Time-limited download URL, so results can be shared without opening the bucket."""
-        return self._client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": self.bucket, "Key": key},
-            ExpiresIn=int(expiry or self.expiry),
-        )

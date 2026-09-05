@@ -257,9 +257,8 @@ helm install macroshock ./charts/macroshock
 helm install macroshock ./charts/macroshock   --set metrics.serviceMonitor.enabled=true   --set ingress.enabled=true --set ingress.host=macroshock.example.org   --set image.tag=v4.0.0
 ```
 
-Prefer plain YAML? [`k8s/`](k8s/) holds the same deployment as raw manifests
-(`kubectl apply -f k8s/`). They are **generated** from the chart by `scripts/render_k8s.py`, and
-CI fails if they drift from it — so there is one source of truth, not two copies.
+Prefer plain manifests? Helm renders them without installing anything:
+`helm template charts/macroshock | kubectl apply -f -`.
 
 Both workloads run as an unprivileged user with `allowPrivilegeEscalation: false`, dropped
 capabilities, resource limits, and startup/readiness/liveness probes. Portfolio persistence is

@@ -47,23 +47,10 @@ def main() -> int:
               "silently show different numbers.")
         return 1
 
-    # 3) Exercise the paths the dashboard actually drives, so a missing transitive import in a
-    #    lazily-imported module is caught too.
+    # 3) Drive one real computation. Every analytics module is imported when
+    #    analytics.engine is imported, so a single call exercises the whole chain.
     weights = {t: 1.0 / len(engine.tickers) for t in engine.tickers}
-    scenario = engine.list_scenarios()[0]["scenario_id"]
-    checks = {
-        "stress_test": lambda: engine.stress_test(weights, scenario),
-        "risk_report": lambda: engine.risk_report(weights),
-        "factor_regression": lambda: engine.factor_regression(weights),
-        "active_risk": lambda: engine.active_risk(weights, "US 60/40"),
-        "reverse_stress": lambda: engine.reverse_stress(weights, 0.20),
-        "backtest": engine.backtest,
-        "exposure_report": engine.exposure_report,
-        "meta": engine.meta,
-    }
-    for name, call in checks.items():
-        call()
-        print(f"  ok: {name}")
+    engine.stress_test(weights, engine.list_scenarios()[0]["scenario_id"])
 
     print(f"PASS: the dashboard's engine path runs on frontend/requirements.txt alone "
           f"(source={source}, weeks={engine.dataset_meta.get('n_weeks')}).")

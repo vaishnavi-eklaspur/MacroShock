@@ -176,11 +176,6 @@ jobs:
             --set ingress.enabled=true \
             --set api.apiKeySecret.enabled=true \
             --set api.apiKeySecret.secretName=macroshock-api-key > rendered.yaml
-      - name: Re-render k8s/ and fail if it drifted from the chart
-        run: |
-          pip install pyyaml
-          python scripts/render_k8s.py
-          git diff --exit-code k8s/             || { echo "::error::k8s/ is stale - run: python scripts/render_k8s.py"; exit 1; }
       - name: Validate rendered manifests (kubeconform)
         run: |
           curl -sSL -o kubeconform.tar.gz \

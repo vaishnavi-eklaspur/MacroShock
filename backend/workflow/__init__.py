@@ -6,7 +6,3 @@ results. The shape deliberately mirrors REANA's model (inputs / workflow steps /
 spec can be executed locally, inside the container image, or as a REANA serial workflow without
 changing anything.
 """
-from .runner import run_workflow
-from .spec import MacroShockSpec, load_spec
-
-__all__ = ["MacroShockSpec", "load_spec", "run_workflow"]

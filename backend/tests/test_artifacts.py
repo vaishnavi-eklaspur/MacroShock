@@ -10,7 +10,8 @@ import pytest
 import yaml
 
 from artifacts import ArtifactStore
-from workflow import load_spec, run_workflow
+from workflow.runner import run_workflow
+from workflow.spec import load_spec
 from workflow.runner import build_engine
 
 SPEC = {
