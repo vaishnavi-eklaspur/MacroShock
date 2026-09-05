@@ -122,6 +122,24 @@ jobs:
           assert s['model_version'];
           print('workflow OK:', s['spec_digest'], s['dataset']['n_weeks'], 'weeks')"
 
+  dashboard-deps:
+    # The deployed dashboard installs ONLY frontend/requirements.txt but runs the backend engine
+    # in-process. Every other job installs the full backend set, so a new top-level backend
+    # import would break the live app while CI stayed green. This reproduces the deployed
+    # environment and runs the real engine path.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ONLY the dashboard's dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r frontend/requirements.txt
+      - name: Load the engine exactly as the deployed dashboard does
+        run: python scripts/check_dashboard_deps.py
+
   helm-chart:
     # The Helm chart is a deliverable: lint it, render every feature path, and validate the
     # rendered manifests against real Kubernetes schemas so a broken chart can't reach main.

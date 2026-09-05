@@ -26,11 +26,6 @@ services:
       - "9001:9001"      # web console
     volumes:
       - macroshock-artifacts:/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
 
   api:
     build: ./backend
@@ -54,7 +49,7 @@ services:
       redis:
         condition: service_healthy
       minio:
-        condition: service_healthy
+        condition: service_started
 
   # Celery worker: executes submitted workflows off the request path.
   worker:
@@ -74,7 +69,7 @@ services:
       redis:
         condition: service_healthy
       minio:
-        condition: service_healthy
+        condition: service_started
 
   dashboard:
     # Self-contained: runs the analytics engine in-process (no API dependency). Built from the
