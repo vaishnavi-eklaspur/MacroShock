@@ -1,13 +1,12 @@
 # MacroShock — Security & Production-Readiness Audit
 
-**Scope:** Flask API (`backend/`), Streamlit dashboard (`frontend/`), React/TypeScript client
-(`frontend-react/`), and deployment configs (Docker Compose, Azure Container Apps, Streamlit
-Community Cloud, GitHub Actions CI).
-**Date:** 2026-08-23 · reflects work through the current `main`.
+**Stack:** Python/Flask + SQLite (mock Snowflake) · Streamlit · React/TypeScript (Vite) · Go CLI ·
+Celery/Redis · S3-compatible object storage · Docker · Kubernetes/Helm
+**Date:** 2026-09-05 · **Commit at audit:** `57a86df` + the fixes recorded below
 
 This document records what was **tested** and what was **addressed**. It does not claim the
 application is "secure" or "leakproof" — it states the specific checks performed, the fixes
-applied, and the gaps left open (see *Known Limitations*).
+applied, and the gaps deliberately left open (see *Known Limitations*).
 
 ---
 
@@ -15,158 +14,142 @@ applied, and the gaps left open (see *Known Limitations*).
 
 | # | Category | Finding | Severity | Status |
 |---|----------|---------|----------|--------|
-| 1 | Secrets & credentials | Full git-history scan (all commits) found no hardcoded keys/tokens/private keys | — | Verified clean |
-| 1 | Secrets & credentials | `.env` gitignored and never committed; only `.env.example` (placeholder `change-me`) | — | Verified |
-| 1 | Secrets & credentials | Secrets read from env (`MACROSHOCK_API_KEY`); Render `sync:false`, Azure `secretref` — none baked into code | — | Verified |
-| 2 | Dependencies (npm) | Production bundle: **0** known vulnerabilities | — | Verified |
-| 2 | Dependencies (npm) | `nanoid` (high) + `postcss` (moderate) in build toolchain | High/Mod | **Fixed** (`npm audit fix`) |
-| 2 | Dependencies (npm) | `esbuild`/`vite` dev-server advisories (dev-only, not shipped) | Moderate | Flagged (needs breaking `vite@8`) |
-| 2 | Dependencies (pip) | `flask`/`flask-cors`/`gunicorn` on older releases with later security fixes | Medium | **Fixed** (→ 3.1.3 / 6.0.5 / 26.1.0; 53 tests green) |
-| 2 | Dependencies (CI) | No automated dependency scanning in the pipeline | Low | **Fixed** (`security-audit` job: `pip-audit` + `npm audit`) |
-| 3 | Auth & session | Write/delete persistence gated by `X-API-Key`, constant-time `hmac.compare_digest`, fail-closed when unset | — | Verified (403 confirmed) |
-| 3 | Auth & session | No user accounts / passwords / JWT / session cookies exist | — | N/A by design |
-| 3 | Auth & session | Saved portfolios are global (no per-user ownership) | Low | Flagged (limitation) |
-| 4 | Injection — SQL | All queries parameterized (`?` placeholders) in `database.py`, `seed.py` | — | Verified |
-| 4 | Injection — XSS | Streamlit escapes by default; the one raw-HTML block (branding footer via `st.markdown(unsafe_allow_html=True)`) is fully hardcoded — no user input | — | Verified |
-| 4 | Injection — cmd | No `eval`/`exec`/`os.system`/`subprocess`/`shell=True` anywhere | — | Verified |
-| 4 | Injection — SSRF | Outbound requests only to hardcoded tickers / env-set base — never user-controlled URLs | — | Verified |
-| 4 | Input validation | Pydantic bounds on every POST body (finite, non-negative, ranged, length-capped) | — | Verified |
-| 5 | Transport | Security headers were absent | Medium | **Fixed** (nosniff, DENY, CSP, Referrer-Policy, HSTS) |
-| 5 | Transport | Rate limiting per real client IP (ProxyFix + Redis, in-proc fallback) | — | Verified |
-| 5 | Transport | CORS `*` on read/compute API | Low | Verified acceptable (no cookies/credentials) |
-| 6 | Errors & logging | `debug=False`; error handlers return controlled JSON, no stack traces to client | — | Verified |
-| 6 | Errors & logging | Validation errors crashed to 500 (pydantic `ctx` holds a non-serializable exception); no catch-all | Medium | **Fixed** (serialization-safe 400 + catch-all JSON 500) |
-| 6 | Errors & logging | Logs contain method/path/status/latency only — no PII/secrets | — | Verified |
-| 7 | Data protection | App stores **no PII** — only weight vectors + public market-return history | — | Verified |
-| 7 | Data protection | SQLite mock DB; no superuser network connection string | — | Verified / N/A |
-| 8 | Config hygiene | `backend/.coverage` (build artifact) was tracked in git | Low | **Fixed** (untracked + gitignored) |
-| 8 | Config hygiene | Docker images ran as root | Medium | **Fixed** (non-root user in both) |
-| 8 | Config hygiene | `.gitignore` covers `.env`, DBs, `node_modules`, `dist`; README has no live creds | — | Verified |
-| 9 | Code quality | 53 tests / 12 files; CI coverage gate `--cov-fail-under=75` (~79% actual) | — | Verified |
-| 9 | Code quality | CI: math-verify, test matrix (3.11/3.12) + ruff, React `tsc` build, security-audit, docker-smoke | — | Verified |
-| 9 | Code quality | 55 commits, incremental & descriptive — not a single squash | — | Verified |
+| 1 | Secrets & credentials | Full git-history scan: no keys, tokens, or private keys ever committed | — | Verified clean |
+| 1 | Secrets & credentials | `.env` gitignored, never committed; `.env.example` holds only `change-me` | — | Verified |
+| 1 | Secrets & credentials | All secrets read from env; K8s consumes the API key from a `Secret` | — | Verified |
+| 2 | Dependencies (pip) | `pip-audit`: **0 vulnerabilities** across all backend packages | — | Verified |
+| 2 | Dependencies (npm) | Production bundle: **0 vulnerabilities** | — | Verified |
+| 2 | Dependencies (npm) | `esbuild`/`vite` dev-server advisories (never shipped) | Moderate | Flagged (needs breaking `vite@8`) |
+| 3 | Auth & session | Write/delete gated by `X-API-Key`, constant-time compare, **fail-closed** | — | Verified (403 tested) |
+| 3 | Auth & session | No passwords/JWT/session cookies exist — stateless analysis service | — | N/A by design |
+| 4 | Injection — SQL | All queries parameterized (`?`); no string-built SQL | — | Verified |
+| 4 | Injection — XSS | Streamlit auto-escapes; no `unsafe_allow_html=True`; React escapes by default | — | Verified |
+| 4 | Injection — cmd/SSRF | No `eval`/`exec`/shell; outbound calls only to hardcoded tickers | — | Verified |
+| 5 | Transport | Strict CSP (`default-src 'none'`), nosniff, X-Frame DENY, Referrer-Policy, HSTS-on-HTTPS | — | **Fixed** (earlier pass) |
+| 5 | Transport | Per-IP rate limiting via ProxyFix + Redis, in-process fallback | — | Verified |
+| 6 | Errors & logging | Validation errors crashed to 500 (pydantic `ctx` not serializable) | Medium | **Fixed** + regression test |
+| 6 | Errors & logging | `debug=False`; catch-all returns generic JSON 500; logs carry no PII | — | Verified |
+| 7 | Data protection | App stores **no PII** — weight vectors + public market data only | — | Verified |
+| 8 | Config hygiene | Non-root containers; `.coverage` untracked; env-driven config | — | **Fixed** (earlier pass) |
+| 9 | Code quality | 83 Python + 9 Go tests; 9-job CI; 60+ incremental commits | — | Verified |
+| **10** | **Container hygiene** | **`backend/.dockerignore` missing** — `COPY . .` baked tests, caches and any local SQLite DB into the published image | **Medium** | **Fixed** |
+| 10 | Container hygiene | `minio/minio:latest` — unpinned, drifts silently | Low | **Fixed** (pinned release) |
+| 10 | Container hygiene | Base images tag-pinned (`python:3.11-slim`) but not digest-pinned | Low | Flagged |
+| 10 | Container hygiene | K8s CPU/memory requests+limits set on both workloads | — | Verified |
+| **11** | **Frontend build secrets** | **`VITE_API_KEY` read in `api.ts` and documented in the README — `VITE_*` is compiled into the public bundle, so the key would ship to every browser** | **High** | **Fixed** (removed entirely) |
+| 11 | Frontend build secrets | Production source maps not emitted (Vite default) | — | Verified |
+| 11 | Frontend build secrets | Streamlit dashboard no longer reads any API key (runs in-process) | — | Verified |
+| 12 | Business logic | Mass assignment: explicit pydantic schemas; workflow spec is `extra="forbid"`; no ORM binding | — | Verified |
+| 12 | Business logic | Concurrency: the single write path is an atomic `ON CONFLICT DO UPDATE` upsert | — | Verified |
+| 12 | Business logic | BOLA: no per-user resources exist (single-tenant) | Low | Flagged (limitation) |
+| **13** | **Repo integrity** | **`cli/go.sum` was not committed** — Go dependency integrity unpinned; CI regenerated it with `go mod tidy` instead of enforcing it | **Medium** | **Fixed** (committed + CI enforces & drift-checks) |
+| **13** | **Repo integrity** | **CI workflows had no `permissions:` block** — `GITHUB_TOKEN` ran at default scope | **Medium** | **Fixed** (`contents: read`) |
+| 13 | Repo integrity | `package-lock.json` committed; CI installs via `npm ci` | — | Verified |
+| **14** | **Artifact sweep** | **`.claude/` named in `.gitignore`/`.dockerignore` disclosed the tooling used** | Low | **Fixed** (generic `.*` rule + local `.git/info/exclude`) |
+| 14 | Artifact sweep | No TODO/FIXME/placeholder comments, no swallowed exceptions, no dead code | — | Verified |
+| **15** | **Production leaks** | **`Server:` header disclosed gunicorn/Werkzeug versions** | Low | **Fixed** (overridden) |
+| 15 | Production leaks | No Swagger/GraphQL introspection, no file uploads, no user-supplied redirects | — | N/A |
+| 15 | Production leaks | `/health` reports model version and component wiring to anonymous callers | Low | Flagged (accepted — see limitations) |
 
 ---
 
-## Interview-ready explanations (per fix / finding)
+## Interview-ready explanations (new categories)
 
-### 1 — Secrets & credentials
-I scanned the entire git history (`git log --all -p`, not just the working tree) for key/token/
-private-key patterns and found none — the only hits were the *words* "secret"/"token" in docs and
-variable names. `.env` is gitignored and was never committed; the repo ships only `.env.example`
-with a `change-me` placeholder. Every secret is read from an environment variable at runtime
-(`os.getenv("MACROSHOCK_API_KEY")`), injected as a Render "sync:false" secret or an Azure Container
-Apps `secretref` — never a default baked into code. **Interview line:** "No secret has ever been in
-the repo. Config comes from the environment; the deploy platforms inject the API key as a managed
-secret, and history is clean, so there's nothing to rotate or scrub."
+### 10 — Container & infrastructure hygiene
+The backend image is built with `./backend` as its context and does `COPY . .`, and there was **no
+`backend/.dockerignore`** — the root one doesn't apply to a nested build context. That meant the
+test suite, `__pycache__`, coverage data and, more importantly, any **local SQLite database** a
+developer had lying around would be baked into a published image. I added a context-specific
+ignore file so the image contains only what actually runs. I also pinned `minio/minio` to a
+release tag, because `:latest` means the image you tested is not necessarily the image you deploy.
+Both workloads already ran as an unprivileged uid 10001 with `allowPrivilegeEscalation: false`,
+dropped capabilities, and explicit CPU/memory requests and limits in the Helm chart.
+**Interview line:** *"A nested build context needs its own `.dockerignore` — the root one doesn't
+apply, and without it I was shipping tests and a stray local database inside a public image."*
 
-### 2 — Dependency vulnerabilities
-`npm audit --omit=dev` reports **zero** vulnerabilities in the code that actually ships to the
-browser (React/React-DOM). The advisories that existed were all in the build toolchain; I applied
-the non-breaking ones (`nanoid` high, `postcss` moderate) with `npm audit fix` and left the
-`esbuild`/`vite` ones flagged because clearing them needs a breaking `vite@8` upgrade and they only
-affect the local dev server, never the deployed static bundle. On the Python side I upgraded
-`flask` (3.0.3→3.1.3), `flask-cors` (4.0.1→6.0.5) and `gunicorn` (22.0.0→26.1.0) to current patched
-releases and confirmed the full suite stayed green, and added a `security-audit` CI job that runs
-`pip-audit` and `npm audit` on every push (pip-audit's local run was network-throttled in the audit
-sandbox, so CI is the authoritative run). **Interview line:** "I separated 'what ships' from 'what
-builds' — the shipped bundle is clean, I bumped the web-facing Python libs to patched versions, and
-CI now scans dependencies on every push so this doesn't silently rot."
+### 11 — Frontend & build-time secrets *(the most serious finding)*
+The React client read `VITE_API_KEY` and attached it as an `X-API-Key` header — and the README
+documented it as configuration. **Anything a Vite build can read is compiled into the JavaScript
+bundle**, so that "secret" would be published to every visitor: open devtools, read the key, and
+you can write to and delete from the persistence API. It was also entirely unnecessary — the React
+client only calls open read/compute endpoints and never touches a key-gated route. I removed the
+key path, its type declaration, and the README line that invited someone to set it. I also
+confirmed Vite emits no production source maps, so the internal API shapes aren't handed out.
+**Interview line:** *"A key in a browser bundle isn't a secret, it's a publication. The client
+didn't need one, so the fix was deleting the capability rather than trying to hide it."*
 
-### 3 — Authentication & session handling
-There is no user/password/JWT system — this is a stateless analytics service — so the usual
-password-hashing and cookie-flag checks are N/A. The one privileged surface is portfolio
-persistence: `POST`/`DELETE /api/portfolios` require an `X-API-Key` compared with
-`hmac.compare_digest` (constant-time, immune to timing attacks) and are **fail-closed** — when no
-key is configured they return 403, so a public instance can never be written to. I confirmed this
-with a live test (POST without a key → 403). **Interview line:** "Writes are constant-time
-key-gated and fail closed; reads and compute stay open because the demo needs them, and they're
-protected by per-IP rate limiting instead."
+### 12 — Business logic & data integrity
+There is no ORM and no mass-assignment surface: every request is parsed into an explicit pydantic
+schema with declared fields, and the workflow specification uses `extra="forbid"` so a typo or an
+injected field fails loudly instead of being silently absorbed. The only endpoint that mutates
+shared state is the portfolio upsert, which is a single atomic `INSERT … ON CONFLICT DO UPDATE`,
+so concurrent saves of the same name can't interleave into a corrupt row. Broken object-level
+authorization genuinely doesn't apply yet — there are no per-user resources to confuse — but I've
+recorded it as a limitation rather than a clean bill of health.
+**Interview line:** *"There's no mass-assignment risk because nothing binds raw JSON to a model —
+every field is declared, and unknown fields are rejected rather than ignored."*
 
-### 4 — Input validation & injection
-Every SQL statement is parameterized (`?` placeholders) — no string-concatenated SQL. Every POST
-body goes through a Pydantic schema that enforces finite numbers, non-negative long-only weights,
-bounded confidence/target-loss, and length-capped names, so malformed or hostile payloads are
-rejected with a clean 400 before touching the engine. There is no `eval`/`exec`/`subprocess`/shell
-usage, so there's no command-injection surface, and the only outbound calls go to hardcoded Yahoo
-tickers — never a user-supplied URL — so there's no SSRF vector. On the UI side, Streamlit escapes
-output by default; the single raw-HTML block (the branding footer, rendered with
-`st.markdown(unsafe_allow_html=True)`) is fully hardcoded with no user input, so it carries no XSS
-risk. **Interview line:** "Injection is closed off structurally: parameterized
-SQL, schema-validated inputs, no shell, no user-controlled URLs, and an auto-escaping UI."
+### 13 — Dependency & repository integrity
+Two real gaps. First, **`cli/go.sum` was never committed** even though the CLI depends on
+`gopkg.in/yaml.v3`, and CI ran `go mod tidy` — which *rewrites* the lockfile rather than enforcing
+it, so builds weren't verified against pinned hashes. I committed `go.sum` and changed CI to
+`go mod download && go mod verify`, plus a step that fails if `go mod tidy` would change anything
+(lockfile-drift detection). Second, the CI workflows declared **no `permissions:` block**, so
+`GITHUB_TOKEN` ran at the repository default scope; both are now `contents: read`, with only the
+image-publishing workflow holding `packages: write`.
+**Interview line:** *"`go mod tidy` in CI isn't lockfile enforcement — it's lockfile laundering.
+I switched to `download`+`verify` and made drift a build failure."*
 
-### 5 — API & transport security
-The API previously set no security headers. I added them on every response:
-`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and —
-because the service returns only JSON, never HTML — a maximally strict
-`Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`. HSTS is emitted only when the
-request arrived over HTTPS (read from the proxy's `X-Forwarded-Proto` via `ProxyFix`), so local HTTP
-dev is unaffected. Rate limiting keys on the real client IP (not the proxy) and is Redis-backed with
-an in-process fallback. CORS is `*` on the read/compute API, which is safe here specifically because
-no cookies or credentials are involved — `*` is only dangerous when combined with credentialed
-requests. **Interview line:** "Because it's a pure JSON API I could lock the CSP all the way down to
-`default-src 'none'`, and I gated HSTS on actual HTTPS so I'm not breaking local dev."
+### 14 — Artifact sweep
+No placeholder comments, no `TODO`/`FIXME`, no exception handlers that swallow errors, no dead or
+duplicated code paths. The one real hit was self-inflicted: I had added `.claude/` to `.gitignore`
+and `.dockerignore`, which **discloses the tooling used** in a repository meant to stand on its own.
+I replaced it with a generic rule that excludes *all* dotted entries from the Docker context (which
+is more robust anyway — any future stray dot-directory is excluded automatically) and moved the git
+ignore to `.git/info/exclude`, which is local and never committed. Protection kept, disclosure gone.
 
-### 6 — Error handling & logging
-`debug` is `False` and production runs under gunicorn, so no interactive debugger or stack trace is
-ever exposed to a client. Custom error handlers turn validation/value/lookup errors into controlled
-JSON messages (400/404); I also fixed a latent bug where a custom-validator error crashed to a 500
-(pydantic stashes the raw exception object in a non-serializable `ctx`) and added a catch-all handler
-that logs the trace server-side and returns a generic JSON 500 for anything unexpected — HTTP errors
-and the specific handlers still take precedence. Request logging records only
-method/path/status/latency — no request bodies, no PII, no secrets. **Interview line:** "Clients get
-clean, generic errors; the detail stays in server logs, and the logs never contain sensitive data."
-
-### 7 — Data protection
-The app stores **no personal data at all** — the only persisted state is portfolio weight vectors
-(ticker → number) and public weekly market-return history. That's the strongest form of data
-protection: the data that isn't collected can't leak. There's no superuser database connection
-string; the store is a file-based SQLite standing in for a Snowflake/Postgres warehouse.
-**Interview line:** "The least-risky PII is the PII you never store — this app keeps none, so
-encryption-at-rest and data-subject concerns are largely moot by design."
-
-### 8 — Config & deployment hygiene
-Both Docker images now run as a dedicated non-root `appuser` (least privilege) — if the process were
-ever compromised, it has no root in the container. I found `backend/.coverage` (a test-run artifact)
-committed to git and removed it from tracking plus added it to `.gitignore`. Configuration is
-entirely environment-driven with an `.env.example` template, dev vs prod differ only by env vars, and
-the README contains no real credentials. **Interview line:** "Containers drop root, config is
-env-var driven with a documented example, and I cleaned a build artifact that had slipped into
-version control."
-
-### 9 — Code-quality signals
-53 tests across 12 files, with CI enforcing a coverage floor (`--cov-fail-under=75`, ~79% actual).
-CI runs an independent from-scratch math verification, the test suite on a Python 3.11/3.12 matrix
-with `ruff` linting, a `tsc` type-check + build of the React client, and a docker-smoke job that
-boots the whole stack and asserts it serves. The history is 50 incremental commits with descriptive
-messages — not a single squashed "final" commit. **Interview line:** "The CI doesn't just run tests
-— it independently re-derives the math, type-checks the frontend, and boots the full stack in Docker,
-so a broken deploy can't reach main."
+### 15 — Miscellaneous production leaks
+There is no Swagger/OpenAPI endpoint, no GraphQL introspection, no file-upload path, and no
+endpoint that redirects to a user-supplied URL, so those classes don't apply. The API did return a
+`Server:` header advertising gunicorn/Werkzeug and their versions, which tells an attacker exactly
+which CVE list to work through for nothing in return — it's now overridden. `/health` deliberately
+reports the model version and which optional components are wired up, because Kubernetes probes and
+operators need it; it contains no secrets and no stack traces, and I've recorded it as an accepted
+disclosure rather than pretending it isn't one.
 
 ---
 
-## Known Limitations (not fixed — by scope or a deliberate decision)
+## Known Limitations (not fixed — by scope or deliberate decision)
 
-1. **Two npm dev-toolchain advisories remain** (`esbuild`/`vite`). Clearing them requires a breaking
-   `vite@8` upgrade. They affect only the local dev server, never the deployed bundle (which audits
-   at zero), so this is flagged rather than force-upgraded.
+1. **Two npm dev-toolchain advisories remain** (`esbuild`/`vite`). Clearing them needs a breaking
+   `vite@8` upgrade. They affect the local dev server only; the shipped bundle audits at zero.
 
-2. **No authentication/authorization system.** Saved portfolios are global, not per-user — this is a
-   single-tenant demo, not a multi-user product. If it became multi-user, add real auth and per-user
-   ownership checks on `/api/portfolios/<name>` to prevent IDOR.
+2. **No authentication or authorization system.** Saved portfolios are global, not per-user. This
+   is a single-tenant analysis service, not a multi-user product. If it became multi-user it needs
+   real identity plus per-user ownership checks on `/api/portfolios/<name>` to prevent BOLA/IDOR.
+   *A static key is also what REANA itself uses (`REANA_ACCESS_TOKEN`); JWT here would add a mock
+   auth server that protects nothing.*
 
-3. **CORS is `*` on the read/compute API.** Safe today because no cookies/credentials are used; if
-   credentialed requests are ever introduced, replace `*` with an explicit origin allowlist
-   (`CORS_ORIGINS` already supports this).
+3. **CORS is `*` on the read/compute API.** Safe only because no cookies or credentials are used;
+   `CORS_ORIGINS` already supports an explicit allowlist if that ever changes.
 
-4. **`/metrics` is unauthenticated** (Prometheus counters by route/status). Low sensitivity, but in a
-   real deployment put it behind network policy or auth.
+4. **`/metrics` and `/health` are unauthenticated.** `/metrics` exposes request counters and
+   latency histograms; `/health` exposes the model version and which components are enabled.
+   Neither carries secrets. In a real deployment both belong behind a network policy.
 
-5. **No encryption at rest, and SQLite stands in for a production warehouse.** Justified for a demo —
-   the store holds only public market data and non-sensitive weight vectors. A real Snowflake/Postgres
-   deployment should add at-rest encryption, a least-privilege database role, and a managed secrets
-   store rather than a single connection principal.
+5. **Base images are tag-pinned, not digest-pinned.** `python:3.11-slim` can move underneath a
+   rebuild. Digest pinning would make builds bit-reproducible; the trade-off is manual patch
+   updates. Application dependencies *are* exactly pinned.
 
-*Closed since the first pass:* `pip-audit`/`npm audit` now run in CI; `flask`/`flask-cors`/`gunicorn`
-upgraded to current patched releases (53 tests green); validation errors now serialize to a clean 400
-and a catch-all JSON 500 handler covers unexpected errors.
+6. **No encryption at rest, and SQLite stands in for a warehouse.** Justified by limitation-free
+   data: the store holds only public market data and non-sensitive weight vectors. A production
+   Snowflake/Postgres deployment should add at-rest encryption, a least-privilege role, and a
+   managed secret store.
+
+7. **The nginx image's master process runs as root** (workers drop to `nginx`). This is standard
+   for the official image; `nginxinc/nginx-unprivileged` would remove it entirely. The React client
+   is a static bundle, so the exposure is minimal.
+
+8. **`.claude/` appears in the *history* of `.gitignore`.** The working tree is clean, but old
+   commits retain the line. Rewriting published history with `filter-repo` for a single ignore
+   entry is a poor trade — it invalidates every commit SHA — so it is recorded rather than scrubbed.

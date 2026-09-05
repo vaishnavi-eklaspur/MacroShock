@@ -23,7 +23,6 @@ backend/data/*.db
 *.swp
 .idea/
 .vscode/
-.claude/
 
 # Env
 .env

@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege for the GITHUB_TOKEN -- read-only: CI only needs to check out code.
+permissions:
+  contents: read
+
 jobs:
   verify-math:
     runs-on: ubuntu-latest
@@ -92,10 +96,18 @@ jobs:
       - name: Build, vet and test
         working-directory: cli
         run: |
-          go mod tidy
+          # download/verify against the COMMITTED go.sum rather than `go mod tidy`, which would
+          # silently rewrite the lockfile instead of enforcing it.
+          go mod download
+          go mod verify
           go vet ./...
           go test ./...
           go build -o macroshock-cli .
+      - name: Fail if go.mod/go.sum are not tidy (lockfile drift)
+        working-directory: cli
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum             || { echo "::error::cli/go.mod or go.sum is stale - run 'go mod tidy' in cli/"; exit 1; }
       - name: Validate the shipped spec with the CLI
         run: ./cli/macroshock-cli validate macroshock.yaml
 

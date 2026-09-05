@@ -1,0 +1,21 @@
+# The backend image is built with ./backend as the context and does `COPY . .`, so without this
+# the test suite, caches, coverage data and any LOCAL SQLite database would be baked into the
+# published image. Keep the image to what actually runs in production.
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+tests
+.venv
+venv
+env
+.env
+*.db
+*.sqlite
+*.sqlite3
+data/macroshock.db
+results
+.DS_Store

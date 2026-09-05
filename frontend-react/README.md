@@ -21,7 +21,7 @@ Type-check / production build:
 npm run build      # tsc (strict) + vite build
 ```
 
-Config: `VITE_API_BASE` (defaults to same-origin via the dev proxy) and `VITE_API_KEY`
+Config: `VITE_API_BASE` (defaults to same-origin via the dev proxy)
 (sent as `X-API-Key` if the backend requires it).
 
 ## Why both UIs?

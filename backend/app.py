@@ -150,6 +150,10 @@ def create_app() -> Flask:
         resp.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
         if request.is_secure:
             resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        # Don't advertise the server implementation/version (gunicorn/Werkzeug); it tells an
+        # attacker which CVEs to try and buys a caller nothing.
+        resp.headers["Server"] = "MacroShock"
+        resp.headers.pop("X-Powered-By", None)
         return resp
 
     @app.get("/metrics")

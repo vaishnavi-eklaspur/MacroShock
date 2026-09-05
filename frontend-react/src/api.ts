@@ -28,12 +28,13 @@ export interface StressResult {
 }
 
 const BASE: string = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
-const API_KEY = import.meta.env.VITE_API_KEY as string | undefined;
 
+// Deliberately no API key here. Anything a Vite build can read (VITE_*) is compiled into the
+// public bundle, so an "API key" in a browser app is not a secret -- it is published. This
+// client only calls open read/compute endpoints; the key-gated persistence routes are not
+// reachable from a public bundle by design.
 function headers(): Record<string, string> {
-  const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (API_KEY) h["X-API-Key"] = API_KEY;
-  return h;
+  return { "Content-Type": "application/json" };
 }
 
 async function get<T>(path: string): Promise<T> {
