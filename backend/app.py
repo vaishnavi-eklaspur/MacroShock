@@ -215,12 +215,22 @@ def create_app() -> Flask:
     # ---------------------------------------------------------------- meta / reference
     @app.get("/health")
     def health():
-        return jsonify({"status": "ok", "cache_enabled": cache.enabled,
-                        "model_version": engine.model_version, "assets": engine.tickers,
-                        "data_source": engine.dataset_meta.get("source", "unknown"),
-                        "job_queue": "celery" if job_queue.enabled else "inline",
-                        "artifact_store_configured": bool(os.getenv("MACROSHOCK_S3_ENDPOINT")),
-                        "realtime": realtime_enabled()})
+        # Liveness/readiness probes only need a 200 and the model version. Which components are
+        # wired up (cache, queue, object store, real-time) is internal information that helps
+        # nobody but an attacker mapping the deployment, so it is returned only to a caller that
+        # presents the API key. With no key configured there is nothing to authenticate with,
+        # and the endpoint stays minimal.
+        body = {"status": "ok", "model_version": engine.model_version}
+        if _authed():
+            body.update({
+                "cache_enabled": cache.enabled,
+                "assets": engine.tickers,
+                "data_source": engine.dataset_meta.get("source", "unknown"),
+                "job_queue": "celery" if job_queue.enabled else "inline",
+                "artifact_store_configured": bool(os.getenv("MACROSHOCK_S3_ENDPOINT")),
+                "realtime": realtime_enabled(),
+            })
+        return jsonify(body)
 
     @app.get("/api/meta")
     def meta():

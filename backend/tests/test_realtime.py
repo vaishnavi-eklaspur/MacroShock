@@ -28,7 +28,9 @@ def test_disabled_by_default(monkeypatch):
 
 def test_health_reports_realtime_off_by_default(monkeypatch):
     monkeypatch.delenv("MACROSHOCK_ENABLE_REALTIME", raising=False)
-    assert create_app().test_client().get("/health").get_json()["realtime"] is False
+    monkeypatch.setenv("MACROSHOCK_API_KEY", "k")
+    body = create_app().test_client().get("/health", headers={"X-API-Key": "k"}).get_json()
+    assert body["realtime"] is False
 
 
 def test_enabled_attaches_a_server_and_emits(monkeypatch):
@@ -41,7 +43,9 @@ def test_enabled_attaches_a_server_and_emits(monkeypatch):
     app = create_app()
     assert realtime.realtime_enabled() is True
     assert realtime._socketio is not None, "expected a Socket.IO server to be attached"
-    assert app.test_client().get("/health").get_json()["realtime"] is True
+    monkeypatch.setenv("MACROSHOCK_API_KEY", "k")
+    body = create_app().test_client().get("/health", headers={"X-API-Key": "k"}).get_json()
+    assert body["realtime"] is True
 
     emitted = {}
     monkeypatch.setattr(realtime._socketio, "emit",

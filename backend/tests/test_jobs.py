@@ -30,8 +30,18 @@ def client(tmp_path, monkeypatch):
     return create_app().test_client()
 
 
-def test_health_reports_the_job_queue_mode(client):
+def test_health_is_minimal_for_anonymous_callers(client):
+    # Internal wiring must not be disclosed to an unauthenticated caller.
     body = client.get("/health").get_json()
+    assert body["status"] == "ok" and body["model_version"]
+    assert "job_queue" not in body and "assets" not in body
+
+
+def test_health_reports_the_job_queue_mode_when_authenticated(monkeypatch, tmp_path):
+    monkeypatch.setenv("MACROSHOCK_API_KEY", "k")
+    monkeypatch.setenv("MACROSHOCK_DISABLE_CELERY", "1")
+    monkeypatch.setenv("MACROSHOCK_RESULTS_DIR", str(tmp_path / "results"))
+    body = create_app().test_client().get("/health", headers={"X-API-Key": "k"}).get_json()
     assert body["job_queue"] == "inline"
 
 

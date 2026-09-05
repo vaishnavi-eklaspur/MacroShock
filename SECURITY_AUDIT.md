@@ -19,7 +19,7 @@ applied, and the gaps deliberately left open (see *Known Limitations*).
 | 1 | Secrets & credentials | All secrets read from env; K8s consumes the API key from a `Secret` | — | Verified |
 | 2 | Dependencies (pip) | `pip-audit`: **0 vulnerabilities** across all backend packages | — | Verified |
 | 2 | Dependencies (npm) | Production bundle: **0 vulnerabilities** | — | Verified |
-| 2 | Dependencies (npm) | `esbuild`/`vite` dev-server advisories (never shipped) | Moderate | Flagged (needs breaking `vite@8`) |
+| 2 | Dependencies (npm) | `esbuild`/`vite` dev-server advisories | Moderate | **Fixed** (vite 5→8, plugin 4→6; audit now 0) |
 | 3 | Auth & session | Write/delete gated by `X-API-Key`, constant-time compare, **fail-closed** | — | Verified (403 tested) |
 | 3 | Auth & session | No passwords/JWT/session cookies exist — stateless analysis service | — | N/A by design |
 | 4 | Injection — SQL | All queries parameterized (`?`); no string-built SQL | — | Verified |
@@ -34,14 +34,15 @@ applied, and the gaps deliberately left open (see *Known Limitations*).
 | 9 | Code quality | 83 Python + 9 Go tests; 9-job CI; 60+ incremental commits | — | Verified |
 | **10** | **Container hygiene** | **`backend/.dockerignore` missing** — `COPY . .` baked tests, caches and any local SQLite DB into the published image | **Medium** | **Fixed** |
 | 10 | Container hygiene | `minio/minio:latest` — unpinned, drifts silently | Low | **Fixed** (pinned release) |
-| 10 | Container hygiene | Base images tag-pinned (`python:3.11-slim`) but not digest-pinned | Low | Flagged |
+| 10 | Container hygiene | Base images were tag-pinned, not digest-pinned | Low | **Fixed** (digest-pinned + Dependabot keeps them fresh) |
+| 10 | Container hygiene | React image ran nginx's master as root | Low | **Fixed** (`nginx-unprivileged`, uid 101, :8080) |
 | 10 | Container hygiene | K8s CPU/memory requests+limits set on both workloads | — | Verified |
 | **11** | **Frontend build secrets** | **`VITE_API_KEY` read in `api.ts` and documented in the README — `VITE_*` is compiled into the public bundle, so the key would ship to every browser** | **High** | **Fixed** (removed entirely) |
 | 11 | Frontend build secrets | Production source maps not emitted (Vite default) | — | Verified |
 | 11 | Frontend build secrets | Streamlit dashboard no longer reads any API key (runs in-process) | — | Verified |
 | 12 | Business logic | Mass assignment: explicit pydantic schemas; workflow spec is `extra="forbid"`; no ORM binding | — | Verified |
 | 12 | Business logic | Concurrency: the single write path is an atomic `ON CONFLICT DO UPDATE` upsert | — | Verified |
-| 12 | Business logic | BOLA: no per-user resources exist (single-tenant) | Low | Flagged (limitation) |
+| 12 | Business logic | BOLA: no per-user resources exist (single-tenant) | Low | Flagged (by design) |
 | **13** | **Repo integrity** | **`cli/go.sum` was not committed** — Go dependency integrity unpinned; CI regenerated it with `go mod tidy` instead of enforcing it | **Medium** | **Fixed** (committed + CI enforces & drift-checks) |
 | **13** | **Repo integrity** | **CI workflows had no `permissions:` block** — `GITHUB_TOKEN` ran at default scope | **Medium** | **Fixed** (`contents: read`) |
 | 13 | Repo integrity | `package-lock.json` committed; CI installs via `npm ci` | — | Verified |
@@ -49,7 +50,7 @@ applied, and the gaps deliberately left open (see *Known Limitations*).
 | 14 | Artifact sweep | No TODO/FIXME/placeholder comments, no swallowed exceptions, no dead code | — | Verified |
 | **15** | **Production leaks** | **`Server:` header disclosed gunicorn/Werkzeug versions** | Low | **Fixed** (overridden) |
 | 15 | Production leaks | No Swagger/GraphQL introspection, no file uploads, no user-supplied redirects | — | N/A |
-| 15 | Production leaks | `/health` reports model version and component wiring to anonymous callers | Low | Flagged (accepted — see limitations) |
+| 15 | Production leaks | `/health` disclosed component wiring to anonymous callers | Low | **Fixed** (minimal unless authenticated) |
 
 ---
 
@@ -121,35 +122,33 @@ disclosure rather than pretending it isn't one.
 
 ## Known Limitations (not fixed — by scope or deliberate decision)
 
-1. **Two npm dev-toolchain advisories remain** (`esbuild`/`vite`). Clearing them needs a breaking
-   `vite@8` upgrade. They affect the local dev server only; the shipped bundle audits at zero.
-
-2. **No authentication or authorization system.** Saved portfolios are global, not per-user. This
+1. **No authentication or authorization system.** Saved portfolios are global, not per-user. This
    is a single-tenant analysis service, not a multi-user product. If it became multi-user it needs
    real identity plus per-user ownership checks on `/api/portfolios/<name>` to prevent BOLA/IDOR.
-   *A static key is also what REANA itself uses (`REANA_ACCESS_TOKEN`); JWT here would add a mock
-   auth server that protects nothing.*
+   *Note this is also the pattern REANA itself uses (`REANA_ACCESS_TOKEN`); adding JWT here would
+   mean standing up a mock auth server that protects nothing.*
 
-3. **CORS is `*` on the read/compute API.** Safe only because no cookies or credentials are used;
-   `CORS_ORIGINS` already supports an explicit allowlist if that ever changes.
+2. **CORS is `*` on the read/compute API.** Correct for a public read API that uses no cookies or
+   credentials — `*` is only dangerous when combined with credentialed requests. `CORS_ORIGINS`
+   already accepts an explicit allowlist if that ever changes.
 
-4. **`/metrics` and `/health` are unauthenticated.** `/metrics` exposes request counters and
-   latency histograms; `/health` exposes the model version and which components are enabled.
-   Neither carries secrets. In a real deployment both belong behind a network policy.
+3. **`/metrics` is unauthenticated.** It exposes request counters and latency histograms, no
+   secrets. It is *not* internet-reachable in the Kubernetes deployment: the ingress routes only
+   `/` and `/api`, so `/metrics` is cluster-internal. Gating it behind the API key would break
+   Prometheus Operator scraping, which cannot send arbitrary headers; a NetworkPolicy is the
+   idiomatic control if stricter isolation is wanted.
 
-5. **Base images are tag-pinned, not digest-pinned.** `python:3.11-slim` can move underneath a
-   rebuild. Digest pinning would make builds bit-reproducible; the trade-off is manual patch
-   updates. Application dependencies *are* exactly pinned.
+4. **No encryption at rest, and SQLite stands in for a warehouse.** Justified by what is stored:
+   only public market data and non-sensitive weight vectors. A production Snowflake/Postgres
+   deployment should add at-rest encryption, a least-privilege role, and a managed secret store.
 
-6. **No encryption at rest, and SQLite stands in for a warehouse.** Justified by limitation-free
-   data: the store holds only public market data and non-sensitive weight vectors. A production
-   Snowflake/Postgres deployment should add at-rest encryption, a least-privilege role, and a
-   managed secret store.
+5. **`.claude/` appears in the *history* of `.gitignore`.** The working tree and all current files
+   are clean. Rewriting published history with `filter-repo` for a single ignore line would
+   invalidate every commit SHA and force-push a public repository — a poor trade, so it is
+   recorded here rather than scrubbed.
 
-7. **The nginx image's master process runs as root** (workers drop to `nginx`). This is standard
-   for the official image; `nginxinc/nginx-unprivileged` would remove it entirely. The React client
-   is a static bundle, so the exposure is minimal.
-
-8. **`.claude/` appears in the *history* of `.gitignore`.** The working tree is clean, but old
-   commits retain the line. Rewriting published history with `filter-repo` for a single ignore
-   entry is a poor trade — it invalidates every commit SHA — so it is recorded rather than scrubbed.
+*Closed since the previous pass:* the React bundle no longer carries an API key; `backend/.dockerignore`
+added; `cli/go.sum` committed and CI enforces it; CI tokens scoped to `contents: read`; server
+version banner suppressed; MinIO and every base image pinned (digests + Dependabot); the React image
+runs unprivileged; `vite` upgraded to 8 (npm audit clean); `/health` discloses nothing to anonymous
+callers.

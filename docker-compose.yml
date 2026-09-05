@@ -4,7 +4,7 @@
 
 services:
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     ports:
       - "6379:6379"
     healthcheck:
@@ -88,7 +88,7 @@ services:
       args:
         VITE_API_BASE: http://localhost:5050
     ports:
-      - "5173:80"
+      - "5173:8080"   # nginx-unprivileged listens on 8080 (non-root)
     depends_on:
       - api
 
