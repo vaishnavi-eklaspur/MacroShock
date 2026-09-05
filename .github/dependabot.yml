@@ -1,24 +1,46 @@
-# Digest-pinned base images are reproducible but do NOT pick up security patches on rebuild.
-# Dependabot bumps the pins (and the language dependencies) so reproducibility doesn't turn
-# into silent rot -- each bump arrives as a PR that must pass the full CI pipeline.
+# Digest-pinned base images are reproducible but do NOT pick up patches on rebuild, so this
+# keeps the pins fresh. It is deliberately conservative: MAJOR upgrades are ignored (they are a
+# human decision, not a bot's -- pandas 2->3 or typescript 5->7 changes behaviour), the cadence
+# is monthly, and only a couple of PRs may be open at once. The goal is security patches without
+# a wall of noisy, red pull requests.
 version: 2
 updates:
   - package-ecosystem: docker
     directories: ["/backend", "/frontend", "/frontend-react"]
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: pip
     directory: "/backend"
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: "/frontend-react"
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: gomod
     directory: "/cli"
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 1
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 1
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
