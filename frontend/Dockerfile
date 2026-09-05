@@ -1,16 +1,23 @@
 # Build context is the REPOSITORY ROOT (not ./frontend): the dashboard runs the analytics
 # engine in-process, so the image must contain the backend package too.
 #   docker build -f frontend/Dockerfile -t macroshock-dashboard .
+
+# ---- build stage: resolve and install dependencies ------------------------------------
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+COPY frontend/requirements.txt ./frontend/requirements.txt
+RUN pip install --no-cache-dir --prefix=/install -r frontend/requirements.txt
+
+# ---- runtime stage --------------------------------------------------------------------
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+COPY --from=builder /install /usr/local
+
 WORKDIR /app
-
-COPY frontend/requirements.txt ./frontend/requirements.txt
-RUN pip install --no-cache-dir -r frontend/requirements.txt
-
 # Both trees: the Streamlit app (frontend/) drives MacroShockEngine (backend/) directly.
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/

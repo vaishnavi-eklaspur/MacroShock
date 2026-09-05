@@ -1,14 +1,22 @@
 # MacroShock
 
-**A multi-asset stress-testing and portfolio-construction engine.** Given a portfolio and a
-macro shock, it decomposes *why* the portfolio breaks (which factors, which holdings,
-regime-aware), quantifies the *tail*, measures the book *against a benchmark* (tracking error,
-active risk, factor tilts), and proposes a *constrained* mitigation trade — the vocabulary of
-an institutional risk desk, in a small, tested, deployable stack.
+**A reproducible computational data-analysis platform, demonstrated on a multi-asset risk
+workload.** An analysis is *declared* in YAML, validated, executed as a versioned workflow, and
+emits provenance-stamped artifacts — so the same specification yields the same numbers on a
+laptop, inside a container, on Kubernetes, or as a [REANA](https://reanahub.io) workflow.
+
+The workload it runs is deliberately numerically heavy: **Ledoit–Wolf constant-correlation
+covariance shrinkage** over a 13-asset × 602-week panel, **regime-conditional risk attribution**
+with block-bootstrap confidence intervals, **fat-tailed tail measures** (Cornish–Fisher,
+Student-t, historical VaR/CVaR), and a constrained SLSQP optimisation — roughly 5.7s of dense
+linear algebra and resampling per cold start, cached thereafter. Given a portfolio and a macro
+shock it decomposes *why* the book breaks (which factors, which holdings, regime-aware),
+quantifies the *tail*, measures the book *against a benchmark*, and proposes a *constrained*
+mitigation trade.
 
 [![CI](https://github.com/vaishnavi-eklaspur/MacroShock/actions/workflows/ci.yml/badge.svg)](https://github.com/vaishnavi-eklaspur/MacroShock/actions/workflows/ci.yml)
 ![coverage](https://img.shields.io/badge/coverage-79%25-brightgreen)
-![tests](https://img.shields.io/badge/tests-54%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-83%20python%20%2B%209%20go-brightgreen)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 ![helm](https://img.shields.io/badge/Helm-chart-0f1689)
 
@@ -248,6 +256,10 @@ helm install macroshock ./charts/macroshock
 # with Prometheus Operator scraping and an ingress:
 helm install macroshock ./charts/macroshock   --set metrics.serviceMonitor.enabled=true   --set ingress.enabled=true --set ingress.host=macroshock.example.org   --set image.tag=v4.0.0
 ```
+
+Prefer plain YAML? [`k8s/`](k8s/) holds the same deployment as raw manifests
+(`kubectl apply -f k8s/`). They are **generated** from the chart by `scripts/render_k8s.py`, and
+CI fails if they drift from it — so there is one source of truth, not two copies.
 
 Both workloads run as an unprivileged user with `allowPrivilegeEscalation: false`, dropped
 capabilities, resource limits, and startup/readiness/liveness probes. Portfolio persistence is

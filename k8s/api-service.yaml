@@ -1,0 +1,28 @@
+# GENERATED FILE - DO NOT EDIT.
+# Rendered from charts/macroshock by scripts/render_k8s.py; edit the chart instead.
+# Regenerate with:  python scripts/render_k8s.py
+---
+# Source: macroshock/templates/api-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: macroshock-api
+  labels:
+    helm.sh/chart: macroshock-0.1.0
+    app.kubernetes.io/name: macroshock
+    app.kubernetes.io/instance: macroshock
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: macroshock
+    app.kubernetes.io/version: "4.0.0"
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: macroshock
+    app.kubernetes.io/instance: macroshock
+    app.kubernetes.io/component: api

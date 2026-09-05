@@ -1,17 +1,26 @@
+# ---- build stage: resolve and install dependencies ------------------------------------
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+COPY requirements.txt .
+# Install into a relocatable prefix so the runtime image receives only the installed
+# packages -- no pip cache, no build tooling, no wheels left behind.
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# ---- runtime stage --------------------------------------------------------------------
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+# /install mirrors the /usr/local layout, so console scripts (gunicorn, celery) land on PATH.
+COPY --from=builder /install /usr/local
+
 WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
 COPY . .
 
 # Data dir for the SQLite DB, kept OUT of the code tree (/app/data) so a mounted volume can
-# never shadow the source. MACROSHOCK_DB points here in compose and on Azure.
+# never shadow the source. MACROSHOCK_DB points here in compose and on Kubernetes.
 RUN mkdir -p /app/dbdata
 
 # Drop root: the process never needs it, and running unprivileged limits the blast radius of a
