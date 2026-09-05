@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software or its methodology, please cite it as below."
+title: "MacroShock: a reproducible multi-asset stress-testing and factor-attribution engine"
+abstract: >-
+  MacroShock is an open-source computational platform for multi-asset portfolio stress testing.
+  It decomposes portfolio losses by risk factor and holding under regime-conditional covariance,
+  quantifies tail risk with fat-tailed estimators, measures benchmark-relative active risk, and
+  solves for the most plausible joint factor shock producing a target loss. Analyses are expressed
+  as declarative YAML workflows and run identically on a laptop, in a container, or on a
+  Kubernetes/REANA cluster, making results reproducible from a pinned data snapshot.
+type: software
+authors:
+  - family-names: Eklaspur
+    given-names: Vaishnavi
+    orcid: ""
+repository-code: "https://github.com/vaishnavi-eklaspur/MacroShock"
+url: "https://macroshock.streamlit.app"
+license: Apache-2.0
+version: "4.0.0"
+keywords:
+  - reproducible-research
+  - computational-workflows
+  - scientific-computing
+  - risk-analytics
+  - factor-models
+  - kubernetes

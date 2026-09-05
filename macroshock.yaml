@@ -1,0 +1,86 @@
+# MacroShock declarative workflow specification.
+#
+# An analysis expressed as data, not as a sequence of API calls: the same spec against the same
+# pinned inputs reproduces the same numbers on any machine. Run it with
+#
+#     cd backend && python -m workflow run ../macroshock.yaml --output ../results
+#
+# or as a REANA workflow (see reana.yaml), which executes exactly this file in the published
+# container image.
+
+version: "1.0"
+
+metadata:
+  name: gfc-2008-multi-asset-stress
+  description: >-
+    Regime-aware stress test of a diversified multi-asset book against the 2008 crisis,
+    with risk attribution, a benchmark-relative view and an out-of-sample backtest.
+  author: Vaishnavi Eklaspur
+
+inputs:
+  # Pinning the source to a committed CSV snapshot is what makes the run reproducible;
+  # `yahoo` would make results depend on the day you ran it.
+  data:
+    source: csv
+    asset_returns: backend/data/real_asset_returns.csv
+    factor_returns: backend/data/real_factor_returns.csv
+
+  portfolio:
+    SPY: 0.20
+    QQQ: 0.08
+    EFA: 0.08
+    EEM: 0.05
+    IEF: 0.15
+    TLT: 0.05
+    TIP: 0.05
+    LQD: 0.10
+    HYG: 0.05
+    GLD: 0.09
+    DBC: 0.04
+    VNQ: 0.06
+
+  # Defaults for every step; a step's own `with:` block overrides these.
+  parameters:
+    confidence: 0.95
+
+workflow:
+  type: serial
+  steps:
+    - name: model-metadata
+      run: meta
+
+    - name: factor-exposures
+      run: exposures
+
+    - name: risk-attribution
+      run: risk-contribution
+
+    - name: gfc-2008
+      run: stress-test
+      with:
+        scenario_id: GFC_2008
+
+    - name: covid-2020
+      run: stress-test
+      with:
+        scenario_id: COVID_2020
+
+    - name: benchmark-relative
+      run: active-risk
+      with:
+        benchmark_id: US 60/40
+
+    - name: reverse-stress-20pct
+      run: reverse-stress
+      with:
+        target_loss: 0.20
+
+    - name: out-of-sample-backtest
+      run: backtest
+
+outputs:
+  directory: results
+  files:
+    - summary.json
+    - gfc-2008.json
+    - out-of-sample-backtest.json

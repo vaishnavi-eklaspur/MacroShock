@@ -40,7 +40,7 @@ jobs:
         run: python -m data.seed
       - name: Run tests with coverage
         working-directory: backend
-        run: pytest -q --cov=analytics --cov=data --cov=app --cov-report=term-missing --cov-fail-under=75
+        run: pytest -q --cov=analytics --cov=data --cov=app --cov=workflow --cov-report=term-missing --cov-fail-under=75
 
   frontend-react:
     # The React/TS client had no CI - a type error could land on main unnoticed.
@@ -79,6 +79,29 @@ jobs:
         run: |
           npm ci
           npm audit --omit=dev --audit-level=high
+
+  workflow-spec:
+    # The declarative workflow is a user-facing contract: validate the shipped spec and execute
+    # it end-to-end, asserting the run is reproducible (pinned CSV source, full provenance).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Validate the shipped spec
+        run: cd backend && python -m workflow validate ../macroshock.yaml
+      - name: Execute the workflow end-to-end
+        run: cd backend && python -m workflow run ../macroshock.yaml --output ../results
+      - name: Assert provenance was recorded
+        run: >
+          python -c "import json;s=json.load(open('results/summary.json'));
+          assert s['dataset']['source']=='csv', s['dataset'];
+          assert len(s['steps'])==8, s['steps'];
+          assert s['model_version'];
+          print('workflow OK:', s['spec_digest'], s['dataset']['n_weeks'], 'weeks')"
 
   helm-chart:
     # The Helm chart is a deliverable: lint it, render every feature path, and validate the

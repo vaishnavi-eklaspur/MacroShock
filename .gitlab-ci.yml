@@ -1,0 +1,105 @@
+# GitLab CI pipeline, mirroring .github/workflows/ci.yml.
+#
+# CERN runs GitLab (gitlab.cern.ch), so the project's quality gates are expressed in both
+# systems and neither is the single source of truth for "does this build". Every job here has a
+# direct counterpart in the GitHub Actions pipeline.
+
+stages:
+  - verify
+  - test
+  - security
+  - package
+
+default:
+  interruptible: true
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+cache:
+  paths:
+    - .cache/pip
+
+# ---------------------------------------------------------------- verify
+verify-math:
+  stage: verify
+  image: python:3.11-slim
+  script:
+    # Re-derives every formula with the standard library only, then asserts the engine agrees.
+    - python scripts/verify_math.py
+
+validate-workflow-spec:
+  stage: verify
+  image: python:3.11-slim
+  script:
+    - pip install --quiet -r backend/requirements.txt
+    - cd backend && python -m workflow validate ../macroshock.yaml
+
+# ---------------------------------------------------------------- test
+backend-tests:
+  stage: test
+  image: python:${PY_VERSION}-slim
+  parallel:
+    matrix:
+      - PY_VERSION: ["3.11", "3.12"]
+  script:
+    - pip install --quiet -r backend/requirements.txt ruff
+    - cd backend
+    - ruff check . --select E9,F63,F7,F82
+    - python -m data.seed
+    - pytest -q --cov=analytics --cov=data --cov=app --cov=workflow
+        --cov-report=term-missing --cov-fail-under=75
+  coverage: '/^TOTAL.+?(\d+\%)$/'
+
+frontend-build:
+  stage: test
+  image: node:20-slim
+  script:
+    - cd frontend-react
+    - npm ci
+    - npm run build          # tsc type-check runs inside the build script
+
+helm-chart:
+  stage: test
+  image: alpine/helm:3.16.3
+  before_script:
+    - apk add --no-cache curl tar
+  script:
+    - helm lint charts/macroshock
+    - helm template macroshock charts/macroshock > /dev/null
+    - helm template macroshock charts/macroshock
+        --set metrics.serviceMonitor.enabled=true
+        --set ingress.enabled=true
+        --set api.apiKeySecret.enabled=true
+        --set api.apiKeySecret.secretName=macroshock-api-key > rendered.yaml
+    - curl -sSL -o kubeconform.tar.gz
+        https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz
+    - tar xf kubeconform.tar.gz
+    - ./kubeconform -summary -strict -ignore-missing-schemas rendered.yaml
+
+# ---------------------------------------------------------------- security
+dependency-audit:
+  stage: security
+  image: python:3.11-slim
+  allow_failure: true      # advisory: a new transitive CVE shouldn't block the pipeline
+  script:
+    - pip install --quiet pip-audit
+    - pip-audit -r backend/requirements.txt --desc
+
+# ---------------------------------------------------------------- package
+container-images:
+  stage: package
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor --context "$CI_PROJECT_DIR/backend"
+        --dockerfile "$CI_PROJECT_DIR/backend/Dockerfile"
+        --destination "$CI_REGISTRY_IMAGE/macroshock-api:$CI_COMMIT_SHORT_SHA"
+    # The dashboard image bundles backend/ too, so it builds from the repository root.
+    - /kaniko/executor --context "$CI_PROJECT_DIR"
+        --dockerfile "$CI_PROJECT_DIR/frontend/Dockerfile"
+        --destination "$CI_REGISTRY_IMAGE/macroshock-dashboard:$CI_COMMIT_SHORT_SHA"

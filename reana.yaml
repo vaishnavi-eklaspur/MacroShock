@@ -1,0 +1,38 @@
+# REANA specification — runs the MacroShock analysis as a reproducible workflow.
+#
+#   reana-client create -f reana.yaml -n macroshock
+#   reana-client upload -w macroshock
+#   reana-client start  -w macroshock
+#   reana-client download results/summary.json -w macroshock
+#
+# The workflow executes the same `macroshock.yaml` spec the CLI runs locally, inside the
+# published container image, against the committed data snapshot — so a result produced here is
+# byte-reproducible by anyone with the workflow file and the image digest.
+
+version: 0.9.0
+
+inputs:
+  files:
+    - macroshock.yaml
+    - backend/data/real_asset_returns.csv
+    - backend/data/real_factor_returns.csv
+  parameters:
+    spec: macroshock.yaml
+    output_dir: results
+
+workflow:
+  type: serial
+  specification:
+    steps:
+      - name: run-analysis
+        # Pin to an immutable digest for a fully reproducible run; :latest is a convenience.
+        environment: 'ghcr.io/vaishnavi-eklaspur/macroshock-api:latest'
+        commands:
+          # The image ships the analytics package at /app; the workspace holds the inputs.
+          - PYTHONPATH=/app python -m workflow run "${spec}" --output "${output_dir}"
+
+outputs:
+  files:
+    - results/summary.json
+    - results/gfc-2008.json
+    - results/out-of-sample-backtest.json

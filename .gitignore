@@ -27,3 +27,6 @@ backend/data/*.db
 
 # Env
 .env
+
+# Workflow run artifacts
+results/

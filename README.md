@@ -40,6 +40,59 @@ the one that survives.
 
 ---
 
+## Analyses as code — declarative workflows
+
+An analysis is not a sequence of clicks or ad-hoc API calls: it is a **specification you can
+version, review and re-run**. MacroShock accepts a `macroshock.yaml` describing the inputs, the
+pipeline and the outputs, and executes it.
+
+```yaml
+inputs:
+  data:                                  # pinned snapshot => reproducible
+    source: csv
+    asset_returns: backend/data/real_asset_returns.csv
+  portfolio: {SPY: 0.20, IEF: 0.15, GLD: 0.09, ...}
+workflow:
+  type: serial
+  steps:
+    - {name: risk-attribution, run: risk-contribution}
+    - {name: gfc-2008,         run: stress-test, with: {scenario_id: GFC_2008}}
+    - {name: out-of-sample-backtest, run: backtest}
+```
+
+```bash
+cd backend
+python -m workflow validate ../macroshock.yaml     # schema check, no computation
+python -m workflow run      ../macroshock.yaml --output ../results
+```
+
+Every step writes a JSON artifact, and `summary.json` records the provenance needed to reproduce
+the run — **spec digest, model version, dataset source/window, and per-step timings**:
+
+```json
+{ "spec_digest": "06ddc60d2a361007", "model_version": "4.0.0",
+  "dataset": {"source": "csv", "as_of_start": "2015-01-09", "as_of_end": "2026-07-17",
+              "n_weeks": "602", "factors": "independent"} }
+```
+
+Validation is strict and happens *before* any computation — unknown fields, duplicate step names,
+unknown tickers and missing step parameters all fail loudly rather than producing a partial run.
+CI validates and executes the shipped spec on every push.
+
+### Running it on REANA
+
+The same spec runs unchanged on [REANA](https://reanahub.io), CERN's reproducible-analysis
+platform, via [`reana.yaml`](reana.yaml) — the workflow executes inside the published container
+image against the committed data snapshot:
+
+```bash
+reana-client create -f reana.yaml -n macroshock
+reana-client upload -w macroshock && reana-client start -w macroshock
+reana-client download results/summary.json -w macroshock
+```
+
+---
+
 ## It fits the model, not the noise
 
 The quickest way to see the engine is real: seeded on live market data (2015–present), the
