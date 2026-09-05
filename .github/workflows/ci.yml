@@ -107,7 +107,12 @@ jobs:
         working-directory: cli
         run: |
           go mod tidy
-          git diff --exit-code go.mod go.sum             || { echo "::error::cli/go.mod or go.sum is stale - run 'go mod tidy' in cli/"; exit 1; }
+          if ! git diff --quiet go.mod go.sum; then
+            echo "::error::cli/go.mod or go.sum is stale - run 'go mod tidy' in cli/"
+            echo "--- what tidy changed ---"
+            git --no-pager diff go.mod go.sum
+            exit 1
+          fi
       - name: Validate the shipped spec with the CLI
         run: ./cli/macroshock-cli validate macroshock.yaml
 
