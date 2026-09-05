@@ -13,6 +13,25 @@ services:
       timeout: 3s
       retries: 5
 
+  # S3-compatible object store for run artifacts. Stands in for the Ceph/S3 endpoint a real
+  # deployment would use; the application code is identical against either.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: macroshock
+      MINIO_ROOT_PASSWORD: macroshock123
+    ports:
+      - "9000:9000"      # S3 API
+      - "9001:9001"      # web console
+    volumes:
+      - macroshock-artifacts:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   api:
     build: ./backend
     environment:
@@ -68,3 +87,4 @@ services:
 
 volumes:
   macroshock-data:
+  macroshock-artifacts:

@@ -101,6 +101,23 @@ cd cli && go build -o macroshock-cli .
 Validation is deliberately duplicated in Go and Python: the client fails fast for the author,
 and the server re-validates because a client is never a trust boundary.
 
+### Artifacts in object storage
+
+A finished analysis produces *files*, and they need to outlive the request. When an S3-compatible
+endpoint is configured, every artifact is published to it and the response carries time-limited
+presigned URLs:
+
+```bash
+export MACROSHOCK_S3_ENDPOINT=http://localhost:9000     # MinIO in docker compose
+export MACROSHOCK_S3_ACCESS_KEY=macroshock MACROSHOCK_S3_SECRET_KEY=macroshock123
+```
+
+`boto3` against a plain S3 endpoint is used deliberately rather than a vendor SDK, so the same
+code targets **MinIO** locally, **AWS S3**, or **Ceph/RadosGW** — the deployment target is
+configuration, not a code change. Publication is strictly additive: if the object store is down,
+the run still succeeds, the results stay on disk, and the summary records `artifact_error`
+rather than failing a computation that already produced correct numbers.
+
 ### Running it on REANA
 
 The same spec runs unchanged on [REANA](https://reanahub.io), CERN's reproducible-analysis

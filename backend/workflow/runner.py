@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import logging
 import os
 import tempfile
 import time
@@ -17,6 +18,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .spec import DataSpec, MacroShockSpec, StepSpec
+
+logger = logging.getLogger("macroshock.workflow")
 
 
 def _resolve_data_path(value: str | None) -> str | None:
@@ -132,8 +135,13 @@ def _spec_digest(spec: MacroShockSpec) -> str:
 
 
 def run_workflow(spec: MacroShockSpec, output_dir: str | Path | None = None,
-                 engine=None) -> dict:
-    """Run every step in order, write artifacts, and return the run summary."""
+                 engine=None, artifact_store=None) -> dict:
+    """Run every step in order, write artifacts, and return the run summary.
+
+    When an object store is configured the artifacts are also published there and time-limited
+    download URLs are attached to the returned summary. They are attached to the return value
+    rather than written into `summary.json`, since a file cannot contain its own published URL.
+    """
     out = Path(output_dir or spec.outputs.directory)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -172,4 +180,22 @@ def run_workflow(spec: MacroShockSpec, output_dir: str | Path | None = None,
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2, default=float),
                                       encoding="utf-8")
+
+    # Publish to the object store if one is configured; a publication failure never invalidates
+    # an otherwise-successful computation, so this only ever adds information.
+    if artifact_store is None:
+        from artifacts import ArtifactStore  # noqa: PLC0415 - optional dependency
+
+        artifact_store = ArtifactStore()
+    if artifact_store.enabled:
+        prefix = f"runs/{summary['spec_digest']}/{out.name}"
+        try:
+            summary = dict(summary,
+                           artifacts=artifact_store.publish_directory(out, prefix=prefix),
+                           artifact_prefix=prefix)
+        except Exception as exc:
+            # The computation succeeded and its results are on disk; losing the upload must not
+            # turn a good run into a failed one. Report it in the summary instead.
+            logger.warning("Artifact publication failed: %s", exc)
+            summary = dict(summary, artifact_error=str(exc))
     return summary

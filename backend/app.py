@@ -18,6 +18,9 @@ POST /api/portfolio/active-risk          benchmark-relative: tracking error, act
 POST /api/portfolio/reverse-stress-test  constrained most-plausible shock + top-k narratives
 POST /api/portfolio/rebalance            mitigation trade only
 GET  /api/backtest                       model-predicted vs realized crisis returns
+POST /api/workflows                      submit a declarative workflow spec -> 202 + job id
+GET  /api/jobs/<job_id>                  status/result of a submitted workflow
+GET  /metrics                            Prometheus exposition (counters + latency histogram)
 GET  /api/portfolios                     list server-saved portfolios
 POST /api/portfolios                     save/upsert a named portfolio
 DELETE /api/portfolios/<name>            delete a saved portfolio
@@ -208,7 +211,8 @@ def create_app() -> Flask:
         return jsonify({"status": "ok", "cache_enabled": cache.enabled,
                         "model_version": engine.model_version, "assets": engine.tickers,
                         "data_source": engine.dataset_meta.get("source", "unknown"),
-                        "job_queue": "celery" if job_queue.enabled else "inline"})
+                        "job_queue": "celery" if job_queue.enabled else "inline",
+                        "artifact_store_configured": bool(os.getenv("MACROSHOCK_S3_ENDPOINT"))})
 
     @app.get("/api/meta")
     def meta():
