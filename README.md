@@ -101,6 +101,24 @@ cd cli && go build -o macroshock-cli .
 Validation is deliberately duplicated in Go and Python: the client fails fast for the author,
 and the server re-validates because a client is never a trust boundary.
 
+### Real-time completion events (optional)
+
+Polling `GET /api/jobs/<id>` is the reliable baseline. With `MACROSHOCK_ENABLE_REALTIME=1` the API
+also pushes a `job_completed` event over Socket.IO, so a client learns the instant a run finishes:
+
+```js
+const socket = io(API_BASE);
+socket.emit("subscribe", { job_id: jobId });
+socket.on("job_completed", ({ result }) => setSummary(result));
+```
+
+It is **off by default and contained on purpose**: `threading` async mode rather than eventlet, so
+nothing monkey-patches a process doing numerical work (set `MACROSHOCK_SOCKETIO_ASYNC_MODE=eventlet`
+with a matching gunicorn worker for a true WebSocket upgrade; otherwise Socket.IO negotiates
+long-polling). When a Redis message queue is configured, a Celery worker publishes the event and
+the API process relays it. A failed notification is swallowed — it can never fail the job that
+produced it.
+
 ### Artifacts in object storage
 
 A finished analysis produces *files*, and they need to outlive the request. When an S3-compatible

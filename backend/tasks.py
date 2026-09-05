@@ -35,5 +35,11 @@ def run_workflow_task(self, spec_dict: dict, output_dir: str | None = None) -> d
     from workflow.runner import run_workflow  # noqa: PLC0415 - keep worker import cost lazy
     from workflow.spec import MacroShockSpec  # noqa: PLC0415
 
+    from realtime import emit_job_event  # noqa: PLC0415
+
     spec = MacroShockSpec(**spec_dict)
-    return run_workflow(spec, output_dir=output_dir)
+    summary = run_workflow(spec, output_dir=output_dir)
+    # Published through the Redis message queue so the API process relays it to subscribers.
+    emit_job_event(self.request.id, "job_completed",
+                   {"job_id": self.request.id, "status": "SUCCESS", "result": summary})
+    return summary

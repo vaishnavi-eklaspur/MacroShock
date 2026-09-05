@@ -80,6 +80,9 @@ class JobQueue:
             record.update(status=FAILURE, error=str(exc))
         record["completed_utc"] = _now()
         self._inline[job_id] = record
+        # Push notification is best-effort; polling remains the reliable path.
+        from realtime import emit_job_event  # noqa: PLC0415
+        emit_job_event(job_id, "job_completed", record)
         return record
 
     # ------------------------------------------------------------------ status

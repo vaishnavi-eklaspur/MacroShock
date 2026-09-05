@@ -60,6 +60,7 @@ from analytics import rebalance as rebalance_mod
 from analytics.engine import MacroShockEngine, _optimized_rebalance_dict
 from cache import Cache
 from jobs import JobQueue
+from realtime import init_realtime, realtime_enabled
 from workflow.spec import MacroShockSpec
 from schemas import (
     ActiveRiskRequest,
@@ -87,6 +88,8 @@ def create_app() -> Flask:
     engine = MacroShockEngine()
     cache = Cache()
     job_queue = JobQueue()
+    # Optional real-time push; returns None (and changes nothing) unless explicitly enabled.
+    init_realtime(app)
 
     api_key = os.getenv("MACROSHOCK_API_KEY")
     rate_per_min = int(os.getenv("MACROSHOCK_RATE_PER_MIN", "120"))
@@ -212,7 +215,8 @@ def create_app() -> Flask:
                         "model_version": engine.model_version, "assets": engine.tickers,
                         "data_source": engine.dataset_meta.get("source", "unknown"),
                         "job_queue": "celery" if job_queue.enabled else "inline",
-                        "artifact_store_configured": bool(os.getenv("MACROSHOCK_S3_ENDPOINT"))})
+                        "artifact_store_configured": bool(os.getenv("MACROSHOCK_S3_ENDPOINT")),
+                        "realtime": realtime_enabled()})
 
     @app.get("/api/meta")
     def meta():
