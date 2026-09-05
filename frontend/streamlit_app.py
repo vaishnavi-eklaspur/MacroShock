@@ -184,6 +184,10 @@ def server_portfolios() -> dict:
 
 
 with st.sidebar.expander("Save / load portfolios (server)"):
+    # On the hosted demo the store is container-local, so it resets whenever the app restarts.
+    # Say so rather than letting someone save a portfolio and quietly lose it.
+    st.caption("Saved to this instance's store. On the public demo that store is ephemeral, "
+               "so saves are cleared when the app restarts.")
     name = st.text_input("Name", placeholder="e.g. Client A")
     if st.button("Save to server", use_container_width=True) and name:
         try:

@@ -8,7 +8,9 @@ name: keep-alive
 # and it also clicks the "get this app back up" button if the app has fallen asleep.
 on:
   schedule:
-    - cron: "23 */4 * * *"      # real browser visit — must land inside the idle window
+    - cron: "23 */2 * * *"      # real browser visit — must land inside the idle window.
+                                # Every 2h (not 4h): Streamlit's idle window can be shorter
+                                # than 4h, and a cold container costs a visitor ~30-60s.
   workflow_dispatch: {}
 
 jobs:
