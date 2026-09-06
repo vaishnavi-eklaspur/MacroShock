@@ -48,6 +48,21 @@ the one that survives.
 
 ---
 
+## A runnable recipe: inputs, code, environment, workflow
+
+A result is only reproducible if all four parts of the recipe are captured. Each is a concrete,
+version-controlled artifact here — nothing lives in someone's shell history:
+
+| Recipe part | Where it lives | Pinned by |
+|---|---|---|
+| **Input data** | `inputs.data` in [`macroshock.yaml`](macroshock.yaml) → a committed market-data snapshot | The file's content hash in git; the runner **refuses to start** if the loaded source isn't the one requested |
+| **Code** | `backend/analytics/` — pure functions, no I/O | `MODEL_VERSION`, which is part of the cache key, so a recalibration can never serve a stale number |
+| **Environment** | `ghcr.io/vaishnavi-eklaspur/macroshock-api` | Digest-pinnable image tag; the same image runs locally, in CI, on Kubernetes and on REANA |
+| **Workflow** | `workflow.steps` in the spec (serial), wrapped by [`reana.yaml`](reana.yaml) | A SHA-256 digest of the validated spec, stamped into every run's `summary.json` |
+
+Change any one of the four and the run identifier changes with it. That is what "reproducible"
+has to mean to be worth claiming.
+
 ## Analyses as code — declarative workflows
 
 An analysis is not a sequence of clicks or ad-hoc API calls: it is a **specification you can
@@ -259,6 +274,11 @@ helm install macroshock ./charts/macroshock   --set metrics.serviceMonitor.enabl
 
 Prefer plain manifests? Helm renders them without installing anything:
 `helm template charts/macroshock | kubectl apply -f -`.
+
+All three images are **multi-stage**: dependencies resolve in a builder stage and only the
+installed prefix is copied into the runtime image, so pip caches, wheels and build tooling never
+reach what you deploy. Base images are digest-pinned (with Dependabot keeping the pins current),
+so a rebuild produces the same image rather than whatever the tag points at today.
 
 Both workloads run as an unprivileged user with `allowPrivilegeEscalation: false`, dropped
 capabilities, resource limits, and startup/readiness/liveness probes. Portfolio persistence is
