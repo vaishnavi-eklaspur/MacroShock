@@ -3,14 +3,14 @@
 #   docker build -f frontend/Dockerfile -t macroshock-dashboard .
 
 # ---- build stage: resolve and install dependencies ------------------------------------
-FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 AS builder
+FROM python:3.11-slim@sha256:e41613d42d4891e4930f79523f93f81bbc7632584ec65e36ab055f41a800b41e AS builder
 
 WORKDIR /app
 COPY frontend/requirements.txt ./frontend/requirements.txt
 RUN pip install --no-cache-dir --prefix=/install -r frontend/requirements.txt
 
 # ---- runtime stage --------------------------------------------------------------------
-FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
+FROM python:3.11-slim@sha256:e41613d42d4891e4930f79523f93f81bbc7632584ec65e36ab055f41a800b41e
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
